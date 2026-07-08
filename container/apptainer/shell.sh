@@ -10,6 +10,7 @@
 # Usage:
 #   ./shell.sh
 #   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" WORK=/scratch/$USER/work ./shell.sh
+#   ./shell.sh --ro-paths "/groups/scicompsoft /nrs/scicompsoft"
 set -euo pipefail
 
 cd "$(dirname "$0")"

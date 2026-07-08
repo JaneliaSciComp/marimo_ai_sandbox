@@ -6,6 +6,11 @@
 # Reads (uses defaults if unset):
 #   WORK, PORT, RO_PATHS
 #
+# Also accepts on the caller's "$@" (highest precedence, overrides the env
+# var and conf/config.toml; consumed here, remaining args are left in "$@"
+# for the caller to forward on):
+#   --ro-paths PATHS   or   --ro-paths=PATHS   (space-separated, same format as RO_PATHS)
+#
 # Sets:
 #   WORK, PORT, RO_PATHS
 #   BIND_PAIRS  -- "src:dst[:options]" strings; callers prefix with -v or --bind
@@ -14,6 +19,30 @@
 # Side-effects:
 #   Creates $WORK/home and $WORK/tmp.
 #   Seeds $WORK with starter notebooks on first run.
+
+# Parse --ro-paths from the caller's args. An empty value (e.g. the pixi
+# task's unset-argument default) is ignored so RO_PATHS env var / config.toml
+# still apply; a non-empty value wins over both.
+_args=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --ro-paths)
+            [[ -n "${2:-}" ]] && RO_PATHS="$2"
+            shift 2
+            ;;
+        --ro-paths=*)
+            _val="${1#--ro-paths=}"
+            [[ -n "$_val" ]] && RO_PATHS="$_val"
+            shift
+            ;;
+        *)
+            _args+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- "${_args[@]}"
+unset _args _val
 
 # Scripts cd to their own directory before sourcing this file, so $PWD is
 # container/apptainer/ or container/podman/.  The project root is two levels up.

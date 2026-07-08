@@ -91,7 +91,14 @@ into `/work`. Attempts to modify the host filesystem fail by design.
 > sandbox. You must bind the **leaf** per-lab paths instead, e.g.
 > `/groups/scicompsoft`. `start.sh`/`shell.sh` **default `RO_PATHS` to your lab
 > dirs** (`/groups/scicompsoft`, `/nrs/scicompsoft`) and **refuse** bare autofs
-> parents. Set your own with `RO_PATHS="/groups/<lab> /nrs/<lab> ..."`.
+> parents. Set your own with `RO_PATHS="/groups/<lab> /nrs/<lab> ..."`, or
+> equivalently:
+> ```bash
+> ./start.sh --ro-paths "/groups/<lab> /nrs/<lab> ..."
+> pixi run marimo "/groups/<lab> /nrs/<lab> ..."
+> ```
+> (The `--ro-paths` CLI flag / pixi task argument takes precedence over the
+> `RO_PATHS` env var and `conf/config.toml`.)
 >
 > Verified: binding `/groups/scicompsoft:ro` makes writes there fail
 > (`Read-only file system`), while binding the parent `/groups:ro` does not.

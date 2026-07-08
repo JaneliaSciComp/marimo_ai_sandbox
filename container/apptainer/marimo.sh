@@ -26,6 +26,7 @@
 # Usage:
 #   ./start.sh                                  # serve Marimo on :8080
 #   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" ./start.sh
+#   ./start.sh --ro-paths "/groups/scicompsoft /nrs/scicompsoft"
 #   WORK=/scratch/$USER/work ./start.sh
 #   PORT=9000 ./start.sh
 #   ./start.sh --port 8888                      # extra args go to marimo

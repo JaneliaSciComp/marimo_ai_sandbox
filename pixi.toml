@@ -35,11 +35,21 @@ shell-podman = "container/podman/shell.sh"
 
 # --- Defaults: apptainer if available, otherwise podman ----------------------
 build = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/build.sh; else container/podman/build.sh; fi'"
-marimo = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/marimo.sh; else container/podman/marimo.sh; fi'"
-shell = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/shell.sh; else container/podman/shell.sh; fi'"
 
 # Convenience: print versions of everything bundled (runs in the pixi env).
 versions = "python --version && marimo --version && node --version"
+
+# ro_paths is a declared task argument (positional, defaults to "" which
+# defers to the RO_PATHS env var / conf/config.toml -- see container/common.sh).
+# Usage: pixi run marimo "/groups/scicompsoft /nrs/scicompsoft"
+#        pixi run marimo "/groups/scicompsoft /nrs/scicompsoft" -- --port 9999
+[tasks.marimo]
+cmd = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/marimo.sh --ro-paths \"{{ ro_paths }}\" \"$@\"; else container/podman/marimo.sh --ro-paths \"{{ ro_paths }}\" \"$@\"; fi' _"
+args = [{ arg = "ro_paths", default = "" }]
+
+[tasks.shell]
+cmd = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/shell.sh --ro-paths \"{{ ro_paths }}\"; else container/podman/shell.sh --ro-paths \"{{ ro_paths }}\"; fi' _"
+args = [{ arg = "ro_paths", default = "" }]
 
 [feature.apptainer.dependencies]
 apptainer = ">=1.5.2,<2"
