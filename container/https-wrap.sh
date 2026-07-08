@@ -2,15 +2,32 @@
 #
 # https-wrap.sh -- front the plain-HTTP Marimo server (started via the
 # existing `pixi run marimo-apptainer` launcher) with a Caddy TLS-terminating
-# reverse proxy, using Caddy's --internal-certs (a locally-generated CA and
-# leaf cert; no cert files to create or manage by hand).
+# reverse proxy.
 #
-# Marimo itself has no TLS support, so this wrapper is the HTTPS layer:
-#   caddy reverse-proxy --from https://0.0.0.0:<https-port> \
-#       --to 127.0.0.1:<internal-port> --internal-certs --disable-redirects
-# (--disable-redirects skips binding the privileged :80 HTTP->HTTPS redirect
-# listener, which fails without root; --from needs an explicit host/scheme
-# or Caddy silently serves plain HTTP instead of TLS.)
+# Marimo itself has no TLS support, so this wrapper is the HTTPS layer. We
+# generate our own persistent self-signed cert with openssl and hand it to
+# Caddy as a static file (`tls <cert> <key>`), rather than using Caddy's
+# internal-CA issuer (`--internal-certs` / `tls internal`). Caddy's internal
+# issuer is backed by its "pki" app, which -- the first time it mints a local
+# CA -- shells out to `sudo` to install that CA's root into the OS trust
+# store. There is no supported way to turn this off in this Caddy version's
+# Caddyfile/JSON schema (`skip_install_trust` on the issuer and `installed`
+# on the pki CA are both rejected as unrecognized fields), and the sudo call
+# hangs/fails on a host with no interactive sudo session (e.g. a compute
+# node). Providing our own cert file sidesteps the internal issuer -- and
+# the pki app -- entirely, so that code path never runs. It also means the
+# certificate persists across restarts instead of being regenerated (and
+# needing browser re-trust) every run.
+#
+# `auto_https off` is required, not just `disable_redirects`: a Caddyfile
+# site address of `https://0.0.0.0:<port>` only matches requests whose Host
+# header is literally "0.0.0.0". Real requests (Host: the actual hostname)
+# fall through to Caddy's automatic-HTTPS default handling for the
+# connection, which manages its own cert via the internal issuer/pki app --
+# triggering the same sudo call this wrapper exists to avoid, regardless of
+# the static cert configured above. `auto_https off` (with a bare `:<port>`
+# address, no scheme/host) disables all automatic cert management so every
+# connection is served by our static cert.
 #
 # Usage:
 #   pixi run marimo-https
@@ -72,13 +89,18 @@ WORK_VAL="${WORK_VAL:-$(pwd)/work}"
 # Launch the existing marimo-apptainer task bound to the internal port, in
 # the background. `-- --host 127.0.0.1` (marimo's own flag, passed through
 # unmodified by marimo.sh/marimo.def) keeps it off 0.0.0.0 so it's only
-# reachable through the Caddy proxy, not directly.
-pixi run marimo-apptainer --port "$INTERNAL_PORT" "$@" -- --host 127.0.0.1 &
+# reachable through the Caddy proxy, not directly. Its stdout/stderr is
+# tee'd to a log file so we can pull the access token out of Marimo's own
+# startup banner ("URL: http://localhost:<port>?access_token=...") below,
+# while still passing the output through to this script's own stdout.
+MARIMO_LOG="$(mktemp)"
+pixi run marimo-apptainer --port "$INTERNAL_PORT" "$@" -- --host 127.0.0.1 > >(tee "$MARIMO_LOG") 2>&1 &
 MARIMO_PID=$!
 
 cleanup() {
     kill "$MARIMO_PID" "${CADDY_PID:-}" 2>/dev/null || true
     wait "$MARIMO_PID" "${CADDY_PID:-}" 2>/dev/null || true
+    rm -f "${CADDYFILE:-}" "$MARIMO_LOG"
 }
 trap cleanup EXIT INT TERM
 
@@ -88,26 +110,57 @@ for _ in $(seq 1 30); do
     sleep 1
 done
 
-echo ">> HTTPS proxy: https://0.0.0.0:${HTTPS_PORT} -> 127.0.0.1:${INTERNAL_PORT}"
-caddy reverse-proxy --from "https://0.0.0.0:${HTTPS_PORT}" --to "127.0.0.1:${INTERNAL_PORT}" \
-    --internal-certs --disable-redirects &
-CADDY_PID=$!
-
-# Caddy's local CA root cert is generated on first startup of the TLS
-# module, so poll for it rather than assuming it already exists. Copy it
-# into the job's work directory and print its path -- install it in your
-# browser's trust store to avoid the untrusted-certificate warning.
-CADDY_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/caddy"
-CA_CERT_SRC="$CADDY_DATA_DIR/pki/authorities/local/root.crt"
-CA_CERT_DEST_DIR="${FG_WORK_DIR:-$WORK_VAL}"
+# Pull the access token out of Marimo's banner so we can print an https://
+# URL (with the same hostname used for the cert) that's directly usable,
+# rather than the http://localhost:<port> one Marimo itself prints (which
+# doesn't reflect the outer hostname/port Caddy is actually serving on).
+ACCESS_TOKEN=""
 for _ in $(seq 1 30); do
-    if [[ -f "$CA_CERT_SRC" ]]; then
-        cp -f "$CA_CERT_SRC" "$CA_CERT_DEST_DIR/caddy-local-ca.crt"
-        echo ">> Caddy local CA root cert: $CA_CERT_DEST_DIR/caddy-local-ca.crt"
-        echo ">> Install it in your browser's trust store to avoid the untrusted-certificate warning."
-        break
-    fi
+    ACCESS_TOKEN="$(grep -m1 -oE 'access_token=[A-Za-z0-9_-]+' "$MARIMO_LOG" 2>/dev/null | head -1 | cut -d= -f2)"
+    [[ -n "$ACCESS_TOKEN" ]] && break
     sleep 1
 done
+
+# Generate a persistent self-signed cert/key the first time (or whenever the
+# hostname changes, e.g. a new compute-node allocation), and reuse it on
+# subsequent runs so the cert doesn't have to be re-trusted in the browser
+# every time. Stored in the work directory alongside other job artifacts.
+CERT_DIR="${FG_WORK_DIR:-$WORK_VAL}/https-cert"
+CERT_FILE="$CERT_DIR/marimo-https.crt"
+KEY_FILE="$CERT_DIR/marimo-https.key"
+HOST_NAME="$(hostname -f 2>/dev/null || hostname)"
+
+if [[ ! -f "$CERT_FILE" || ! -f "$KEY_FILE" ]] || ! openssl x509 -in "$CERT_FILE" -noout -checkhost "$HOST_NAME" >/dev/null 2>&1; then
+    mkdir -p "$CERT_DIR"
+    SAN="DNS:${HOST_NAME},DNS:$(hostname),DNS:localhost,IP:127.0.0.1"
+    for _ip in $(hostname -I 2>/dev/null); do
+        SAN="${SAN},IP:${_ip}"
+    done
+    echo ">> Generating self-signed HTTPS cert for ${HOST_NAME} (10-year validity)"
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+        -keyout "$KEY_FILE" -out "$CERT_FILE" -days 3650 \
+        -subj "/CN=${HOST_NAME}" -addext "subjectAltName=${SAN}"
+fi
+
+if [[ -n "$ACCESS_TOKEN" ]]; then
+    echo ">> HTTPS proxy: https://${HOST_NAME}:${HTTPS_PORT}?access_token=${ACCESS_TOKEN} -> 127.0.0.1:${INTERNAL_PORT}"
+else
+    echo ">> HTTPS proxy: https://${HOST_NAME}:${HTTPS_PORT} -> 127.0.0.1:${INTERNAL_PORT}"
+fi
+echo ">> Cert: $CERT_FILE -- install it in your browser's trust store to avoid the untrusted-certificate warning."
+CADDYFILE="$(mktemp)"
+cat > "$CADDYFILE" <<EOF
+{
+    admin off
+    auto_https off
+}
+
+:${HTTPS_PORT} {
+    tls ${CERT_FILE} ${KEY_FILE}
+    reverse_proxy 127.0.0.1:${INTERNAL_PORT}
+}
+EOF
+caddy run --config "$CADDYFILE" --adapter caddyfile &
+CADDY_PID=$!
 
 wait "$CADDY_PID"

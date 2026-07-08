@@ -78,15 +78,20 @@ proxy:
 pixi run marimo-https                 # serves https://<host>:8443 -> internal :8080
 ```
 
-Caddy terminates TLS using `caddy reverse-proxy --internal-certs`, which
-auto-generates a local CA and leaf certificate on first run — no cert files
-to create or manage. On startup, the script copies Caddy's local CA root
-cert into the work directory (`caddy-local-ca.crt`) and prints its path;
-install it in your browser's trust store to avoid the untrusted-certificate
-warning (Chrome: Settings → Privacy and security → Security → Manage
-certificates → Authorities → Import; Firefox: Settings → Privacy & Security
-→ Certificates → View Certificates → Authorities → Import). This is
-entirely self-contained — it doesn't depend on Fileglancer to obtain a cert.
+Caddy terminates TLS using a self-signed certificate that the wrapper script
+generates itself (via `openssl`) and hands to Caddy as a static cert file,
+rather than Caddy's own internal-CA issuer — that issuer's first run tries to
+install its CA root into the OS trust store via `sudo`, which hangs/fails on
+a host with no interactive sudo session (e.g. a compute node). The cert is
+stored in the work directory (`https-cert/marimo-https.crt`) and reused
+across restarts instead of being regenerated (it's only regenerated if the
+hostname changes, e.g. a new compute-node allocation). On startup the script
+prints the cert's path; install it in your browser's trust store to avoid
+the untrusted-certificate warning (Chrome: Settings → Privacy and security →
+Security → Manage certificates → Authorities → Import; Firefox: Settings →
+Privacy & Security → Certificates → View Certificates → Authorities →
+Import). This is entirely self-contained — it doesn't depend on Fileglancer
+to obtain a cert.
 
 ### Read-only model
 

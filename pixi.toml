@@ -54,18 +54,6 @@ args = [{ arg = "ro_paths", default = "" }, { arg = "work", default = "" }, { ar
 cmd = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/shell.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\"; else container/podman/shell.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\"; fi' _"
 args = [{ arg = "ro_paths", default = "" }, { arg = "work", default = "" }]
 
-# Fronts the plain-HTTP marimo-apptainer launch with a Caddy TLS-terminating
-# reverse proxy (--internal-certs, a locally-generated CA -- no cert files
-# to manage). See container/https-wrap.sh.
-[tasks.marimo-https]
-cmd = "container/https-wrap.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\" --port \"{{ port }}\" --https-port \"{{ https_port }}\""
-args = [
-  { arg = "ro_paths", default = "" },
-  { arg = "work", default = "" },
-  { arg = "port", default = "" },
-  { arg = "https_port", default = "" },
-]
-
 [feature.apptainer.dependencies]
 apptainer = ">=1.5.2,<2"
 
@@ -74,6 +62,22 @@ build-apptainer-pixi = "container/apptainer/build.sh"
 
 [feature.https.dependencies]
 caddy = ">=2.8,<3"
+openssl = ">=3.5,<4"   # generates the persistent self-signed cert for https-wrap.sh
+
+# Fronts the plain-HTTP marimo-apptainer launch with a Caddy TLS-terminating
+# reverse proxy, using a persistent self-signed cert (see container/https-wrap.sh).
+# Declared under [feature.https.tasks] (rather than [tasks]) so `pixi run
+# marimo-https` always resolves to the "https" environment, which has caddy
+# and openssl -- without this it could otherwise pick an environment lacking
+# them and fail.
+[feature.https.tasks.marimo-https]
+cmd = "container/https-wrap.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\" --port \"{{ port }}\" --https-port \"{{ https_port }}\""
+args = [
+  { arg = "ro_paths", default = "" },
+  { arg = "work", default = "" },
+  { arg = "port", default = "" },
+  { arg = "https_port", default = "" },
+]
 
 [environments]
 apptainer = ["apptainer"]
