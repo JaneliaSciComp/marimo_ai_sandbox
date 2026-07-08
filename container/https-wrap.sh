@@ -141,8 +141,8 @@ pixi run marimo-apptainer --port "$INTERNAL_PORT" "$@" -- --host 127.0.0.1 > >(t
 MARIMO_PID=$!
 
 cleanup() {
-    kill "$MARIMO_PID" "${CADDY_PID:-}" 2>/dev/null || true
-    wait "$MARIMO_PID" "${CADDY_PID:-}" 2>/dev/null || true
+    kill "$MARIMO_PID" "${CADDY_PID:-}" "${PUBLISHER_PID:-}" 2>/dev/null || true
+    wait "$MARIMO_PID" "${CADDY_PID:-}" "${PUBLISHER_PID:-}" 2>/dev/null || true
     rm -f "${CADDYFILE:-}" "$MARIMO_LOG"
 }
 trap cleanup EXIT INT TERM
@@ -237,20 +237,43 @@ CADDY_PID=$!
 # http://$FG_HOSTNAME:$FG_SERVICE_PORT, which here would be Marimo's own
 # plain-HTTP port, not Caddy's TLS one) once Caddy is actually accepting
 # connections on HTTPS_PORT.
+#
+# This is intentionally independent of the short (30s) ACCESS_TOKEN wait
+# above: on a cold start, Marimo's image can still be building well past
+# that window (its whole point is only to make the *console* message above
+# usable immediately on a warm restart). Publish the URL as soon as Caddy is
+# up -- without the token if it isn't known yet -- then keep polling
+# MARIMO_LOG and re-publish with the token once it does appear, rather than
+# permanently omitting it.
 if [[ -n "${SERVICE_URL_PATH:-}" ]]; then
-    _url_suffix=""
-    [[ -n "$ACCESS_TOKEN" ]] && _url_suffix="?access_token=${ACCESS_TOKEN}"
     (
-        for _ in $(seq 1 3600); do
-            if (exec 3<>"/dev/tcp/127.0.0.1/$HTTPS_PORT") 2>/dev/null; then
-                printf 'https://%s:%s/%s' "${FG_HOSTNAME:-$HOST_NAME}" "$HTTPS_PORT" "$_url_suffix" > "$SERVICE_URL_PATH"
-                echo ">> Published service URL to $SERVICE_URL_PATH"
-                exit 0
+        _https_up=0
+        _token="$ACCESS_TOKEN"
+        for _ in $(seq 1 1800); do
+            if [[ "$_https_up" -eq 0 ]] && (exec 3<>"/dev/tcp/127.0.0.1/$HTTPS_PORT") 2>/dev/null; then
+                _https_up=1
+            fi
+            if [[ -z "$_token" ]]; then
+                _token="$(grep -m1 -oE 'access_token=[A-Za-z0-9_-]+' "$MARIMO_LOG" 2>/dev/null | head -1 | cut -d= -f2)" || true
+            fi
+            if [[ "$_https_up" -eq 1 ]]; then
+                _suffix=""
+                [[ -n "$_token" ]] && _suffix="?access_token=${_token}"
+                printf 'https://%s:%s/%s' "${FG_HOSTNAME:-$HOST_NAME}" "$HTTPS_PORT" "$_suffix" > "$SERVICE_URL_PATH"
+                if [[ -n "$_token" ]]; then
+                    echo ">> Published service URL (with access token) to $SERVICE_URL_PATH"
+                    exit 0
+                fi
             fi
             sleep 1
         done
-        echo "https-wrap: port $HTTPS_PORT never opened; service URL not published." >&2
+        if [[ "$_https_up" -eq 0 ]]; then
+            echo "https-wrap: port $HTTPS_PORT never opened; service URL not published." >&2
+        else
+            echo "https-wrap: access token never appeared after 30 min; service URL published without it." >&2
+        fi
     ) &
+    PUBLISHER_PID=$!
 fi
 
 wait "$CADDY_PID"
