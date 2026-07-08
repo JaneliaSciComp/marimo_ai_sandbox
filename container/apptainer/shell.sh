@@ -19,7 +19,7 @@ SIF="${SIF:-marimo_sandbox.sif}"
 
 if [[ ! -f "$SIF" ]]; then
     echo ">> Image '$SIF' not found -- building now ..."
-    bash "$(dirname "$0")/build.sh"
+    bash ./build.sh
 fi
 
 # shellcheck source=common.sh
