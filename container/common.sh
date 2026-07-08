@@ -17,17 +17,51 @@
 
 # Scripts cd to their own directory before sourcing this file, so $PWD is
 # container/apptainer/ or container/podman/.  The project root is two levels up.
-WORK="${WORK:-$(cd "$PWD/../.." && pwd)/work}"
+_PROJECT_ROOT="$(cd "$PWD/../.." && pwd)"
+
+# Load conf/config.toml if present, setting WORK, PORT, RO_PATHS from it
+# (only when not already set in the environment).
+_CONFIG="$_PROJECT_ROOT/conf/config.toml"
+if [[ -f "$_CONFIG" ]]; then
+    _toml_work="$(python3 -c "
+import tomllib, sys
+with open('$_CONFIG', 'rb') as f:
+    d = tomllib.load(f)
+print(d.get('work', ''))
+" 2>/dev/null)"
+    _toml_port="$(python3 -c "
+import tomllib, sys
+with open('$_CONFIG', 'rb') as f:
+    d = tomllib.load(f)
+print(d.get('port', ''))
+" 2>/dev/null)"
+    _toml_ro="$(python3 -c "
+import tomllib, sys
+with open('$_CONFIG', 'rb') as f:
+    d = tomllib.load(f)
+print(' '.join(d.get('ro_paths', [])))
+" 2>/dev/null)"
+    [[ -n "$_toml_work" ]] && WORK="${WORK:-$_toml_work}"
+    [[ -n "$_toml_port" ]] && PORT="${PORT:-$_toml_port}"
+    [[ -n "$_toml_ro"   ]] && RO_PATHS="${RO_PATHS:-$_toml_ro}"
+    unset _toml_work _toml_port _toml_ro
+fi
+unset _CONFIG
+
+WORK="${WORK:-$_PROJECT_ROOT/work}"
 PORT="${PORT:-8080}"
+unset _PROJECT_ROOT
 
 # Default read-only paths: leaf NFS mounts that exist on this host.
 # See READ-ONLY CAVEAT in start.sh -- bare autofs parents must not be used.
-_default_ro=""
-for _d in /groups/scicompsoft /nrs/scicompsoft; do
-    [[ -d "$_d" ]] && _default_ro="$_default_ro $_d"
-done
-RO_PATHS="${RO_PATHS:-$_default_ro}"
-unset _default_ro _d
+if [[ -z "${RO_PATHS+set}" ]]; then
+    _default_ro=""
+    for _d in /groups/scicompsoft /nrs/scicompsoft; do
+        [[ -d "$_d" ]] && _default_ro="$_default_ro $_d"
+    done
+    RO_PATHS="$_default_ro"
+    unset _default_ro _d
+fi
 
 # Prepare the writable work dir.
 mkdir -p "$WORK"/home "$WORK"/tmp

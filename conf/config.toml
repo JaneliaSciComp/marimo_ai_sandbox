@@ -1,0 +1,15 @@
+# Marimo AI sandbox configuration
+# Parsed by container/common.sh at runtime.
+
+# Read-only host paths exposed inside the container.
+# Must be LEAF paths — not bare autofs parents like /groups or /nrs.
+#ro_paths = [
+#    "/groups/scicompsoft",
+#    "/nrs/scicompsoft",
+#]
+
+# Writable work directory. Default: <project-root>/work
+#work = "/scratch/USER/work"
+
+# Marimo port. Default: 8080
+#port = 8080
