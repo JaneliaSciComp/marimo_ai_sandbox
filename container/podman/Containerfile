@@ -1,0 +1,67 @@
+FROM ubuntu:24.04
+
+# Avoid prompts during package installations
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies needed for bootstrap and agent installation
+# Disable apt privilege sandboxing: rootless Podman without /etc/subuid entries
+# can't map UIDs beyond the current user, so apt's _apt sandbox user (UID 42) fails.
+RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99no-sandbox && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl ca-certificates git bash tar xz-utils && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install pixi
+ENV PIXI_HOME=/opt/pixi
+ENV PATH="$PIXI_HOME/bin:$PATH"
+# TAR_OPTIONS: rootless Podman without /etc/subuid can't chown to UIDs outside the mapped range
+ENV TAR_OPTIONS=--no-same-owner
+RUN curl -fsSL https://pixi.sh/install.sh | bash
+
+# Copy pixi configuration files
+COPY pixi.toml pixi.lock /opt/app/
+
+# Build the locked Python environment into /opt/app/.pixi/envs/default
+WORKDIR /opt/app
+RUN pixi install --locked
+
+# Add the pixi env to PATH
+ENV PIXI_ENV=/opt/app/.pixi/envs/default
+ENV PATH="$PIXI_ENV/bin:$PATH"
+
+# Install npm-based agent CLIs and ACP adapters
+ENV NPM_CONFIG_PREFIX=/opt/npm-global
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+RUN npm install -g \
+        @anthropic-ai/claude-code \
+        @openai/codex \
+        @google/gemini-cli \
+        @zed-industries/claude-code-acp \
+        @zed-industries/codex-acp && \
+    npm cache clean --force || true
+
+# Install Antigravity CLI (Google)
+RUN mkdir -p /opt/antigravity/bin && \
+    curl -fsSL https://antigravity.google/cli/install.sh \
+        | bash -s -- --dir /opt/antigravity/bin || \
+        echo "WARNING: Antigravity CLI install failed; continuing without it."
+
+# Copy starter notebook/app files
+COPY app /opt/app/app
+
+# Set permissions: make everything world-readable/executable
+RUN chmod -R a+rX /opt/app/.pixi /opt/npm-global /opt/antigravity /opt/pixi
+
+# Configure environment variables
+ENV PATH="$PIXI_ENV/bin:/opt/npm-global/bin:/opt/antigravity/bin:/opt/pixi/bin:$PATH"
+ENV MARIMO_HEADLESS=1
+ENV DISABLE_AUTOUPDATER=1
+
+# Expose default Marimo port
+EXPOSE 8080
+
+# Default entrypoint: serve Marimo with the file browser rooted at / so that
+# all bind-mounted host paths (e.g. /groups/scicompsoft) are directly visible.
+# New notebooks should be saved under /work, which is the container's CWD.
+ENTRYPOINT ["marimo", "edit", "/", "--headless", "--host", "0.0.0.0", "--port", "8080"]

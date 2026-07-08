@@ -1,0 +1,51 @@
+[workspace]
+name = "marimo-ai-sandbox"
+description = "Marimo notebook server + AI coding agent CLIs in a read-only Apptainer sandbox"
+authors = ["Mark Kittisopikul <kittisopikulm@janelia.hhmi.org>"]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[dependencies]
+python = "3.12.*"
+marimo = ">=0.23.13,<0.24"
+nodejs = ">=26.4.0,<26.5"   # runtime for the npm-based agent CLIs (claude, codex, gemini, ACP adapters)
+uv = ">=0.11.27,<0.12"          # fast installer, handy inside notebooks
+git = ">=2.55.0,<3"
+jq = ">=1.8.2,<2"          # JSON wrangling on the command line / in notebooks
+vim = ">=9.2.478,<10"         # editors available inside the sandbox
+nano = ">=9.1,<10"
+
+# Optional data-science extras commonly used from Marimo notebooks.
+numpy = ">=2.5.1,<3"
+pandas = ">=3.0.3,<4"
+polars = ">=1.42.1,<2"
+altair = ">=6.2.2,<7"
+
+[tasks]
+# --- Apptainer ---------------------------------------------------------------
+build-apptainer = "container/apptainer/build.sh"
+marimo-apptainer = "container/apptainer/marimo.sh"
+shell-apptainer = "container/apptainer/shell.sh"
+
+# --- Podman ------------------------------------------------------------------
+build-podman = "container/podman/build.sh"
+marimo-podman = "container/podman/marimo.sh"
+shell-podman = "container/podman/shell.sh"
+
+# --- Defaults: apptainer if available, otherwise podman ----------------------
+build = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/build.sh; else container/podman/build.sh; fi'"
+marimo = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/marimo.sh; else container/podman/marimo.sh; fi'"
+shell = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/shell.sh; else container/podman/shell.sh; fi'"
+
+# Convenience: print versions of everything bundled (runs in the pixi env).
+versions = "python --version && marimo --version && node --version"
+
+[feature.apptainer.dependencies]
+apptainer = ">=1.5.2,<2"
+
+[feature.apptainer.tasks]
+build-apptainer-pixi = "container/apptainer/build.sh"
+
+[environments]
+apptainer = ["apptainer"]

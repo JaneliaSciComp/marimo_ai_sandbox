@@ -1,0 +1,97 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+# ---------------------------------------------------------------------------
+# Marimo AI Sandbox
+#
+# A read-only container bundling a Marimo notebook server (Python env built by
+# pixi) plus four AI coding agent CLIs and their ACP adapters:
+#   - Claude Code   (@anthropic-ai/claude-code)        -> `claude`
+#   - OpenAI Codex  (@openai/codex)                     -> `codex`
+#   - Gemini CLI    (@google/gemini-cli, native --acp)  -> `gemini`
+#   - Antigravity   (Google, native Go binary)          -> `agy`
+#   - ACP adapters: @zed-industries/claude-code-acp, @zed-industries/codex-acp
+#
+# Everything is installed at BUILD time (network is available here). At RUNTIME
+# the rootfs is read-only; the only writable surface is the /work bind mount
+# (see start.sh), into which HOME and TMPDIR are redirected.
+# ---------------------------------------------------------------------------
+
+%files
+    pixi.toml /opt/app/pixi.toml
+    pixi.lock /opt/app/pixi.lock
+    container/app /opt/app/app
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        curl ca-certificates git bash tar xz-utils
+    rm -rf /var/lib/apt/lists/*
+
+    # --- pixi -------------------------------------------------------------
+    export PIXI_HOME=/opt/pixi
+    export PATH="$PIXI_HOME/bin:$PATH"
+    curl -fsSL https://pixi.sh/install.sh | bash
+
+    # Build the locked Python environment into /opt/app/.pixi/envs/default
+    cd /opt/app
+    pixi install --locked
+    PIXI_ENV=/opt/app/.pixi/envs/default
+    export PATH="$PIXI_ENV/bin:$PATH"
+
+    # --- npm-based agent CLIs + ACP adapters ------------------------------
+    # Installed into a baked global prefix so they are read-only at runtime.
+    export NPM_CONFIG_PREFIX=/opt/npm-global
+    export NPM_CONFIG_UPDATE_NOTIFIER=false
+    npm install -g \
+        @anthropic-ai/claude-code \
+        @openai/codex \
+        @google/gemini-cli \
+        @zed-industries/claude-code-acp \
+        @zed-industries/codex-acp
+    npm cache clean --force || true
+
+    # --- Antigravity CLI (Google) -----------------------------------------
+    # Native Go binary "agy". Installed to /opt/antigravity/bin via the
+    # official bootstrapper. NOTE: agy self-updates in the background at
+    # runtime; that write is blocked by the read-only rootfs (non-fatal).
+    mkdir -p /opt/antigravity/bin
+    curl -fsSL https://antigravity.google/cli/install.sh \
+        | bash -s -- --dir /opt/antigravity/bin || \
+        echo "WARNING: Antigravity CLI install failed; continuing without it."
+
+    # --- permissions: make everything world-readable/executable -----------
+    chmod -R a+rX /opt/app/.pixi /opt/npm-global /opt/antigravity /opt/pixi
+
+%environment
+    export PIXI_ENV=/opt/app/.pixi/envs/default
+    export PATH="$PIXI_ENV/bin:/opt/npm-global/bin:/opt/antigravity/bin:/opt/pixi/bin:$PATH"
+    export MARIMO_HEADLESS=1
+    # Disable self-update / telemetry chatter that would fight the read-only fs.
+    export NPM_CONFIG_UPDATE_NOTIFIER=false
+    export DISABLE_AUTOUPDATER=1
+
+%runscript
+    # Default action: serve Marimo against the writable /work bind mount.
+    # Extra args are passed through to `marimo edit`.
+    exec marimo edit / --headless --host 0.0.0.0 --port 8080 "$@"
+
+%labels
+    Author Mark Kittisopikul
+    Description Marimo + AI coding agents in a read-only sandbox
+
+%help
+    Read-only Marimo sandbox with Claude Code, Codex, Gemini CLI and
+    Antigravity bundled. Build with build.sh, run with start.sh.
+
+    Serve Marimo:   ./start.sh
+    Open a shell:   ./shell.sh
+    (Bind LEAF per-lab paths read-only, e.g. /groups/scicompsoft -- a ":ro"
+     bind of the autofs parent /groups does NOT protect nested NFS mounts.)
+
+    Inside the container the agents are on PATH: claude, codex, gemini, agy.
+    Provide credentials at runtime via environment variables
+    (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY / GOOGLE_API_KEY).

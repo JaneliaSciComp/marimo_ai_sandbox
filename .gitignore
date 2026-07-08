@@ -1,0 +1,14 @@
+# Apptainer image artifacts
+*.sif
+*.img
+
+# pixi environment (rebuilt from pixi.lock)
+.pixi/
+
+# runtime writable work directory
+work/
+
+# OS / editor cruft
+.DS_Store
+__pycache__/
+*.pyc
