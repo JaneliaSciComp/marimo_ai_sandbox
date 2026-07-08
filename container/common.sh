@@ -22,6 +22,7 @@ _PROJECT_ROOT="$(cd "$PWD/../.." && pwd)"
 # Load conf/config.toml if present, setting WORK, PORT, RO_PATHS from it
 # (only when not already set in the environment).
 _CONFIG="$_PROJECT_ROOT/conf/config.toml"
+[[ ! -f "$_CONFIG" ]] && _CONFIG="$_PROJECT_ROOT/conf/config.default.toml"
 if [[ -f "$_CONFIG" ]]; then
     _toml_work="$(python3 -c "
 import tomllib, sys

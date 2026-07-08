@@ -8,6 +8,9 @@
 # runtime writable work directory
 work/
 
+# user-local config (copy of conf/config.default.toml; not tracked)
+conf/config.toml
+
 # OS / editor cruft
 .DS_Store
 __pycache__/
