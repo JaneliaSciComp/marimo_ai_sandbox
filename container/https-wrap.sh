@@ -137,9 +137,13 @@ done
 # URL (with the same hostname used for the cert) that's directly usable,
 # rather than the http://localhost:<port> one Marimo itself prints (which
 # doesn't reflect the outer hostname/port Caddy is actually serving on).
+# The `|| true` matters: under `set -e -o pipefail`, `grep -m1` finding no
+# match yet (the common case on early loop iterations, e.g. while Marimo's
+# image is still building) makes the whole assignment's pipeline fail,
+# which would otherwise abort the script on the very first iteration.
 ACCESS_TOKEN=""
 for _ in $(seq 1 30); do
-    ACCESS_TOKEN="$(grep -m1 -oE 'access_token=[A-Za-z0-9_-]+' "$MARIMO_LOG" 2>/dev/null | head -1 | cut -d= -f2)"
+    ACCESS_TOKEN="$(grep -m1 -oE 'access_token=[A-Za-z0-9_-]+' "$MARIMO_LOG" 2>/dev/null | head -1 | cut -d= -f2)" || true
     [[ -n "$ACCESS_TOKEN" ]] && break
     sleep 1
 done
