@@ -55,7 +55,7 @@ source "../common.sh"
 
 if ! podman image exists "$IMAGE" &>/dev/null; then
     echo ">> Image '$IMAGE' not found -- building now ..."
-    bash "$(dirname "$0")/build.sh"
+    bash ./build.sh
 fi
 
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(-v "$p"); done
