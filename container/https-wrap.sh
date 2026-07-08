@@ -163,4 +163,23 @@ EOF
 caddy run --config "$CADDYFILE" --adapter caddyfile &
 CADDY_PID=$!
 
+# Publish the service URL ourselves (Fileglancer's auto_url always writes
+# http://$FG_HOSTNAME:$FG_SERVICE_PORT, which here would be Marimo's own
+# plain-HTTP port, not Caddy's TLS one) once Caddy is actually accepting
+# connections on HTTPS_PORT.
+if [[ -n "${SERVICE_URL_PATH:-}" ]]; then
+    _url_suffix=""
+    [[ -n "$ACCESS_TOKEN" ]] && _url_suffix="?access_token=${ACCESS_TOKEN}"
+    (
+        for _ in $(seq 1 3600); do
+            if (exec 3<>"/dev/tcp/127.0.0.1/$HTTPS_PORT") 2>/dev/null; then
+                printf 'https://%s:%s/%s' "${FG_HOSTNAME:-$HOST_NAME}" "$HTTPS_PORT" "$_url_suffix" > "$SERVICE_URL_PATH"
+                exit 0
+            fi
+            sleep 1
+        done
+        echo "https-wrap: port $HTTPS_PORT never opened; service URL not published." >&2
+    ) &
+fi
+
 wait "$CADDY_PID"

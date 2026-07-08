@@ -39,8 +39,6 @@ runnables:
   - id: marimo-https
     name: Start Marimo Server (HTTPS)
     type: service
-    auto_url: true
-    service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
     working_dir: repo
     description: >-
       Serves the Marimo notebook server behind a local Caddy TLS-terminating
@@ -49,9 +47,9 @@ runnables:
       the wrapper script copies Caddy's local CA root cert into this job's
       work directory (caddy-local-ca.crt) and prints its path -- install it
       in your browser's trust store to avoid the untrusted-certificate
-      warning. NOTE: if the generated access link starts with "http://",
-      change it to "https://" manually -- Fileglancer's auto_url scheme
-      behavior for HTTPS services is unverified.
+      warning. The wrapper script publishes the service URL itself (rather
+      than using Fileglancer's auto_url) so the link points at Caddy's HTTPS
+      port instead of Marimo's own plain-HTTP port.
     command: >-
       PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https marimo-https
       --port "$FG_SERVICE_PORT" --https-port "$((FG_SERVICE_PORT + 1))"
