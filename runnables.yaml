@@ -52,7 +52,7 @@ runnables:
       port instead of Marimo's own plain-HTTP port.
     command: >-
       PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https marimo-https
-      --port "$FG_SERVICE_PORT" --https-port "$((FG_SERVICE_PORT + 1))"
+      --port "$FG_SERVICE_PORT"
     parameters:
       - flag: --ro-paths
         name: Read-only paths

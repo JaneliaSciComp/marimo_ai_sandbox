@@ -37,12 +37,34 @@
 #   --ro-paths PATHS   forwarded to marimo-apptainer
 #   --work PATH        forwarded to marimo-apptainer
 #   --port PORT        internal Marimo port (default 8080)
-#   --https-port PORT  public TLS-terminating port Caddy listens on (default 8443)
+#   --https-port PORT  public TLS-terminating port Caddy listens on (default: an
+#                       arbitrary free port, auto-selected)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."   # project root
 
-HTTPS_PORT="8443"
+# Finds a free TCP port the same way Fileglancer's own job runner does
+# (bind-to-0 via python, falling back to probing the ephemeral range), since
+# we can't assume the caller-supplied --https-port (if any) or a fixed
+# default like 8443 is actually free on this host.
+__free_port() {
+    local p py i
+    for py in python3 python; do
+        if command -v "$py" >/dev/null 2>&1; then
+            p="$("$py" -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()' 2>/dev/null)" || true
+            [[ -n "$p" ]] && { printf '%s' "$p"; return 0; }
+        fi
+    done
+    for i in $(seq 1 50); do
+        p=$(( (RANDOM % 16384) + 49152 ))
+        if ! (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
+            printf '%s' "$p"; return 0
+        fi
+    done
+    printf '%s' 8443
+}
+
+HTTPS_PORT=""
 _args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -63,6 +85,7 @@ while [[ $# -gt 0 ]]; do
 done
 set -- "${_args[@]}"
 unset _args _val
+[[ -z "$HTTPS_PORT" ]] && HTTPS_PORT="$(__free_port)"
 
 INTERNAL_PORT="8080"
 WORK_VAL="${WORK:-}"
