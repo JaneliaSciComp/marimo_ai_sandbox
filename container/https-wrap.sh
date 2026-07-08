@@ -41,7 +41,25 @@
 #                       arbitrary free port, auto-selected)
 set -euo pipefail
 
+# Under set -e a failing command just kills the script with no explanation,
+# which previously looked like Marimo's image build itself failing (it
+# hadn't -- the failure was elsewhere, seconds after start; see the
+# ACCESS_TOKEN loop below). Log what actually failed and where before
+# `cleanup` (registered further down) runs.
+trap 'echo ">> https-wrap: FATAL: \"$BASH_COMMAND\" failed (exit $?) at line $LINENO" >&2' ERR
+
 cd "$(dirname "$0")/.."   # project root
+
+# Reports coarse startup progress to Fileglancer's phase file (set only when
+# this runs as a Fileglancer service job), which its UI reads to explain a
+# wait before the service URL appears. Only "pulling_image" and "starting"
+# are recognized values (see fileglancer's jobfiles.py); we reuse them
+# loosely here since our own apptainer build (via marimo-apptainer, below)
+# plays the same role as an image pull.
+_set_phase() {
+    [[ -n "${FG_PHASE_PATH:-}" ]] && printf '%s' "$1" > "$FG_PHASE_PATH" 2>/dev/null
+    return 0
+}
 
 # Finds a free TCP port the same way Fileglancer's own job runner does
 # (bind-to-0 via python, falling back to probing the ephemeral range), since
@@ -116,6 +134,8 @@ WORK_VAL="${WORK_VAL:-$(pwd)/work}"
 # tee'd to a log file so we can pull the access token out of Marimo's own
 # startup banner ("URL: http://localhost:<port>?access_token=...") below,
 # while still passing the output through to this script's own stdout.
+echo ">> Starting Marimo (building its Apptainer image first, if needed -- this can take several minutes on a fresh job) ..."
+_set_phase pulling_image
 MARIMO_LOG="$(mktemp)"
 pixi run marimo-apptainer --port "$INTERNAL_PORT" "$@" -- --host 127.0.0.1 > >(tee "$MARIMO_LOG") 2>&1 &
 MARIMO_PID=$!
@@ -128,10 +148,24 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Wait for Marimo to come up before starting Caddy, to avoid a confusing 502.
+# This budget (30s) is deliberately much shorter than a fresh image build can
+# take -- it only exists to skip the confusing-502 window on a warm start; a
+# timeout here just means Caddy comes up before Marimo does, which is fine.
+echo ">> Waiting (up to 30s) for Marimo to accept connections on 127.0.0.1:${INTERNAL_PORT} ..."
+_marimo_up=0
 for _ in $(seq 1 30); do
-    curl -sf "http://127.0.0.1:$INTERNAL_PORT" >/dev/null 2>&1 && break
+    if curl -sf "http://127.0.0.1:$INTERNAL_PORT" >/dev/null 2>&1; then
+        _marimo_up=1
+        break
+    fi
     sleep 1
 done
+if [[ "$_marimo_up" -eq 1 ]]; then
+    echo ">> Marimo is accepting connections."
+else
+    echo ">> Marimo hasn't responded yet after 30s (still building/starting); continuing -- Caddy will 502 until it's up."
+fi
+_set_phase starting
 
 # Pull the access token out of Marimo's banner so we can print an https://
 # URL (with the same hostname used for the cert) that's directly usable,
@@ -141,12 +175,18 @@ done
 # match yet (the common case on early loop iterations, e.g. while Marimo's
 # image is still building) makes the whole assignment's pipeline fail,
 # which would otherwise abort the script on the very first iteration.
+echo ">> Waiting (up to 30s) for Marimo's access token ..."
 ACCESS_TOKEN=""
 for _ in $(seq 1 30); do
     ACCESS_TOKEN="$(grep -m1 -oE 'access_token=[A-Za-z0-9_-]+' "$MARIMO_LOG" 2>/dev/null | head -1 | cut -d= -f2)" || true
     [[ -n "$ACCESS_TOKEN" ]] && break
     sleep 1
 done
+if [[ -n "$ACCESS_TOKEN" ]]; then
+    echo ">> Got Marimo's access token."
+else
+    echo ">> No access token found after 30s; the published URL will omit it."
+fi
 
 # Generate a persistent self-signed cert/key the first time (or whenever the
 # hostname changes, e.g. a new compute-node allocation), and reuse it on
@@ -167,6 +207,8 @@ if [[ ! -f "$CERT_FILE" || ! -f "$KEY_FILE" ]] || ! openssl x509 -in "$CERT_FILE
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
         -keyout "$KEY_FILE" -out "$CERT_FILE" -days 3650 \
         -subj "/CN=${HOST_NAME}" -addext "subjectAltName=${SAN}"
+else
+    echo ">> Reusing existing HTTPS cert for ${HOST_NAME} ($CERT_FILE)"
 fi
 
 if [[ -n "$ACCESS_TOKEN" ]]; then
@@ -175,6 +217,7 @@ else
     echo ">> HTTPS proxy: https://${HOST_NAME}:${HTTPS_PORT} -> 127.0.0.1:${INTERNAL_PORT}"
 fi
 echo ">> Cert: $CERT_FILE -- install it in your browser's trust store to avoid the untrusted-certificate warning."
+echo ">> Starting Caddy on :${HTTPS_PORT} ..."
 CADDYFILE="$(mktemp)"
 cat > "$CADDYFILE" <<EOF
 {
@@ -201,6 +244,7 @@ if [[ -n "${SERVICE_URL_PATH:-}" ]]; then
         for _ in $(seq 1 3600); do
             if (exec 3<>"/dev/tcp/127.0.0.1/$HTTPS_PORT") 2>/dev/null; then
                 printf 'https://%s:%s/%s' "${FG_HOSTNAME:-$HOST_NAME}" "$HTTPS_PORT" "$_url_suffix" > "$SERVICE_URL_PATH"
+                echo ">> Published service URL to $SERVICE_URL_PATH"
                 exit 0
             fi
             sleep 1
