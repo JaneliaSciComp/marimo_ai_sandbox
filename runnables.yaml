@@ -5,6 +5,7 @@ description: >-
   sandbox; only a single work directory is writable.
 requirements:
   - apptainer
+  - pixi
 runnables:
   - id: marimo
     name: Start Marimo Server
@@ -17,9 +18,7 @@ runnables:
       read-only except for the work directory, which holds notebooks and
       agent config/cache.
     command: >-
-      bash -c 'if command -v apptainer &>/dev/null; then
-      container/apptainer/marimo.sh "$@"; else
-      container/podman/marimo.sh "$@"; fi' --
+      PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-apptainer
       --port "$FG_SERVICE_PORT" --token-password "$FG_SERVICE_TOKEN"
     parameters:
       - flag: --ro-paths
