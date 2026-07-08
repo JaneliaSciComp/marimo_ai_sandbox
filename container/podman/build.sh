@@ -13,11 +13,17 @@ cd "$(dirname "$0")"
 IMAGE="${IMAGE:-marimo_sandbox:latest}"
 FILE="${FILE:-Containerfile}"
 
-# pixi.lock and the app/ build context live at the project root (two levels up).
+# pixi.lock lives at the project root (two levels up), which is also the
+# Podman build context (see the `podman build` invocation below).
 if [[ ! -f ../../pixi.lock ]]; then
     echo "pixi.lock not found -- run 'pixi install' first." >&2
     exit 1
 fi
+
+# container/app is optional starter content; ensure it exists (even if empty)
+# so the Containerfile's `COPY container/app /opt/app/app` never fails on a
+# missing source dir.
+mkdir -p ../app
 
 # Set XDG_RUNTIME_DIR if the default one is missing or inaccessible (necessary for Janelia HPC compute nodes)
 if [[ -z "${XDG_RUNTIME_DIR:-}" ]] || [[ ! -d "$XDG_RUNTIME_DIR" ]]; then

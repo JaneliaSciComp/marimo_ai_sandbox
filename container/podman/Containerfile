@@ -47,8 +47,8 @@ RUN mkdir -p /opt/antigravity/bin && \
         | bash -s -- --dir /opt/antigravity/bin || \
         echo "WARNING: Antigravity CLI install failed; continuing without it."
 
-# Copy starter notebook/app files
-COPY app /opt/app/app
+# Copy starter notebook/app files (build context is the project root; see build.sh)
+COPY container/app /opt/app/app
 
 # Set permissions: make everything world-readable/executable
 RUN chmod -R a+rX /opt/app/.pixi /opt/npm-global /opt/antigravity /opt/pixi

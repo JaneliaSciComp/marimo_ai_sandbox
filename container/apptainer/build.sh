@@ -24,6 +24,10 @@ if [[ ! -f pixi.lock ]]; then
     exit 1
 fi
 
+# container/app is optional starter content; ensure it exists (even if empty)
+# so the %files copy in marimo.def never fails on a missing source dir.
+mkdir -p container/app
+
 echo ">> Building ${SIF} from ${DEF} ..."
 # Use local scratch for the build temp dir to avoid mksquashfs segfaults on NFS.
 APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-/scratch/$(id -un)/apptainer-tmp}"
