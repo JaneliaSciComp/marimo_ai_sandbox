@@ -52,16 +52,7 @@ WORK="${WORK:-$_PROJECT_ROOT/work}"
 PORT="${PORT:-8080}"
 unset _PROJECT_ROOT
 
-# Default read-only paths: leaf NFS mounts that exist on this host.
-# See READ-ONLY CAVEAT in start.sh -- bare autofs parents must not be used.
-if [[ -z "${RO_PATHS+set}" ]]; then
-    _default_ro=""
-    for _d in /groups/scicompsoft /nrs/scicompsoft; do
-        [[ -d "$_d" ]] && _default_ro="$_default_ro $_d"
-    done
-    RO_PATHS="$_default_ro"
-    unset _default_ro _d
-fi
+RO_PATHS="${RO_PATHS:-}"
 
 # Prepare the writable work dir.
 mkdir -p "$WORK"/home "$WORK"/tmp
