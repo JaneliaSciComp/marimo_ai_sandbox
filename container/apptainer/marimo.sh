@@ -28,8 +28,10 @@
 #   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" ./start.sh
 #   ./start.sh --ro-paths "/groups/scicompsoft /nrs/scicompsoft"
 #   WORK=/scratch/$USER/work ./start.sh
+#   ./start.sh --work /scratch/$USER/work
 #   PORT=9000 ./start.sh
-#   ./start.sh --port 8888                      # extra args go to marimo
+#   ./start.sh --port 9000
+#   ./start.sh --extra-marimo-flag                 # unrecognized args go to marimo
 set -euo pipefail
 
 cd "$(dirname "$0")"

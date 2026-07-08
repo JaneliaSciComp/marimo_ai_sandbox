@@ -74,7 +74,7 @@ Open the printed URL (with the access token) in a browser. The notebook
 mounted; `/tmp` is a private tmpfs) and then:
 
 - bind-mounts each path in `RO_PATHS` **read-only**;
-- binds `./work` → `/work` **read-write** (override with `WORK=/path`);
+- binds `./work` → `/work` **read-write** (override with `WORK=/path` or `--work /path`);
 - sets `HOME=/work/home` (via `--home`, the only mechanism that works —
   apptainer refuses to set `HOME` via `--env`) and `TMPDIR=/work/tmp`, so
   Marimo notebooks live in `/work` and agent config/cache (`~/.claude`,
@@ -97,8 +97,11 @@ into `/work`. Attempts to modify the host filesystem fail by design.
 > ./start.sh --ro-paths "/groups/<lab> /nrs/<lab> ..."
 > pixi run marimo "/groups/<lab> /nrs/<lab> ..."
 > ```
-> (The `--ro-paths` CLI flag / pixi task argument takes precedence over the
-> `RO_PATHS` env var and `conf/config.toml`.)
+> `WORK` and `PORT` accept the same treatment (`--work`/`--port` flags, or
+> the 2nd/3rd positional pixi task arguments — pass `""` to skip one and set
+> a later one, e.g. `pixi run marimo "" "" 9999` for just the port). CLI
+> flags / pixi task arguments take precedence over the env vars, which take
+> precedence over `conf/config.toml`.
 >
 > Verified: binding `/groups/scicompsoft:ro` makes writes there fail
 > (`Read-only file system`), while binding the parent `/groups:ro` does not.

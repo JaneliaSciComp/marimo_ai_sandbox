@@ -9,7 +9,7 @@
 # Usage:
 #   ./shell_podman.sh
 #   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" WORK=/scratch/$USER/work ./shell_podman.sh
-#   ./shell_podman.sh --ro-paths "/groups/scicompsoft /nrs/scicompsoft"
+#   ./shell_podman.sh --ro-paths "/groups/scicompsoft /nrs/scicompsoft" --work /scratch/$USER/work
 set -euo pipefail
 
 cd "$(dirname "$0")"

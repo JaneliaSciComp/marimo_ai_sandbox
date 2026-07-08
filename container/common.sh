@@ -10,6 +10,8 @@
 # var and conf/config.toml; consumed here, remaining args are left in "$@"
 # for the caller to forward on):
 #   --ro-paths PATHS   or   --ro-paths=PATHS   (space-separated, same format as RO_PATHS)
+#   --work PATH        or   --work=PATH
+#   --port PORT        or   --port=PORT
 #
 # Sets:
 #   WORK, PORT, RO_PATHS
@@ -20,9 +22,9 @@
 #   Creates $WORK/home and $WORK/tmp.
 #   Seeds $WORK with starter notebooks on first run.
 
-# Parse --ro-paths from the caller's args. An empty value (e.g. the pixi
-# task's unset-argument default) is ignored so RO_PATHS env var / config.toml
-# still apply; a non-empty value wins over both.
+# Parse --ro-paths/--work/--port from the caller's args. An empty value (e.g.
+# a pixi task's unset-argument default) is ignored so the env var /
+# conf/config.toml still apply; a non-empty value wins over both.
 _args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -33,6 +35,24 @@ while [[ $# -gt 0 ]]; do
         --ro-paths=*)
             _val="${1#--ro-paths=}"
             [[ -n "$_val" ]] && RO_PATHS="$_val"
+            shift
+            ;;
+        --work)
+            [[ -n "${2:-}" ]] && WORK="$2"
+            shift 2
+            ;;
+        --work=*)
+            _val="${1#--work=}"
+            [[ -n "$_val" ]] && WORK="$_val"
+            shift
+            ;;
+        --port)
+            [[ -n "${2:-}" ]] && PORT="$2"
+            shift 2
+            ;;
+        --port=*)
+            _val="${1#--port=}"
+            [[ -n "$_val" ]] && PORT="$_val"
             shift
             ;;
         *)

@@ -39,17 +39,20 @@ build = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/
 # Convenience: print versions of everything bundled (runs in the pixi env).
 versions = "python --version && marimo --version && node --version"
 
-# ro_paths is a declared task argument (positional, defaults to "" which
-# defers to the RO_PATHS env var / conf/config.toml -- see container/common.sh).
+# ro_paths/work/port are declared positional task arguments, each defaulting
+# to "" which defers to the matching env var / conf/config.toml (see
+# container/common.sh). Pass "" for an argument to skip it and set a later
+# one, e.g. `pixi run marimo "" "" 9999` to only override the port.
 # Usage: pixi run marimo "/groups/scicompsoft /nrs/scicompsoft"
-#        pixi run marimo "/groups/scicompsoft /nrs/scicompsoft" -- --port 9999
+#        pixi run marimo "/groups/scicompsoft /nrs/scicompsoft" /scratch/$USER/work 9999
+#        pixi run marimo "/groups/scicompsoft /nrs/scicompsoft" -- --extra-marimo-flag
 [tasks.marimo]
-cmd = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/marimo.sh --ro-paths \"{{ ro_paths }}\" \"$@\"; else container/podman/marimo.sh --ro-paths \"{{ ro_paths }}\" \"$@\"; fi' _"
-args = [{ arg = "ro_paths", default = "" }]
+cmd = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/marimo.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\" --port \"{{ port }}\" \"$@\"; else container/podman/marimo.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\" --port \"{{ port }}\" \"$@\"; fi' _"
+args = [{ arg = "ro_paths", default = "" }, { arg = "work", default = "" }, { arg = "port", default = "" }]
 
 [tasks.shell]
-cmd = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/shell.sh --ro-paths \"{{ ro_paths }}\"; else container/podman/shell.sh --ro-paths \"{{ ro_paths }}\"; fi' _"
-args = [{ arg = "ro_paths", default = "" }]
+cmd = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/shell.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\"; else container/podman/shell.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\"; fi' _"
+args = [{ arg = "ro_paths", default = "" }, { arg = "work", default = "" }]
 
 [feature.apptainer.dependencies]
 apptainer = ">=1.5.2,<2"

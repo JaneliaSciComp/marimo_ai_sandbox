@@ -17,8 +17,10 @@
 #   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" ./run_podman.sh
 #   ./run_podman.sh --ro-paths "/groups/scicompsoft /nrs/scicompsoft"
 #   WORK=/scratch/$USER/work ./run_podman.sh
+#   ./run_podman.sh --work /scratch/$USER/work
 #   PORT=9000 ./run_podman.sh
-#   ./run_podman.sh --port 8888                      # extra args go to marimo
+#   ./run_podman.sh --port 9000
+#   ./run_podman.sh --extra-marimo-flag              # unrecognized args go to marimo
 set -euo pipefail
 
 cd "$(dirname "$0")"
