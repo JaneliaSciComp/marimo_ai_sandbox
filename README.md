@@ -68,6 +68,26 @@ export GEMINI_API_KEY=...          # or GOOGLE_API_KEY
 Open the printed URL (with the access token) in a browser. The notebook
 `app/agents_demo.py` is copied into `./work` on first run.
 
+### HTTPS (optional)
+
+Marimo has no built-in TLS support, so `pixi run marimo-https` fronts the
+same launch flow with a local [Caddy](https://caddyserver.com/) reverse
+proxy:
+
+```bash
+pixi run marimo-https                 # serves https://<host>:8443 -> internal :8080
+```
+
+Caddy terminates TLS using `caddy reverse-proxy --internal-certs`, which
+auto-generates a local CA and leaf certificate on first run — no cert files
+to create or manage. On startup, the script copies Caddy's local CA root
+cert into the work directory (`caddy-local-ca.crt`) and prints its path;
+install it in your browser's trust store to avoid the untrusted-certificate
+warning (Chrome: Settings → Privacy and security → Security → Manage
+certificates → Authorities → Import; Firefox: Settings → Privacy & Security
+→ Certificates → View Certificates → Authorities → Import). This is
+entirely self-contained — it doesn't depend on Fileglancer to obtain a cert.
+
 ### Read-only model
 
 `start.sh` launches the container with `--contain` (host home and CWD are NOT
@@ -146,3 +166,7 @@ To drive these agents from an external ACP client (e.g. Zed):
   updates. Pin them if you need byte-for-byte reproducibility.
 - **Marimo auth:** `marimo edit` prints a per-session access token; use it (or
   `--token-password`) when exposing the port beyond localhost.
+- **HTTPS:** plain `marimo`/`start.sh` serve HTTP only. Use `pixi run
+  marimo-https` for a locally TLS-terminated option (see above); its
+  self-signed cert requires installing the printed CA cert to avoid browser
+  warnings.

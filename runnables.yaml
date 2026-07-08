@@ -35,3 +35,38 @@ runnables:
         description: >-
           Writable host directory bound to /work inside the sandbox. Defaults
           to ./work.
+
+  - id: marimo-https
+    name: Start Marimo Server (HTTPS)
+    type: service
+    auto_url: true
+    service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
+    working_dir: repo
+    description: >-
+      Serves the Marimo notebook server behind a local Caddy TLS-terminating
+      reverse proxy using Caddy's self-signed --internal-certs (no cert
+      management required, and independent of Fileglancer). On first run,
+      the wrapper script copies Caddy's local CA root cert into this job's
+      work directory (caddy-local-ca.crt) and prints its path -- install it
+      in your browser's trust store to avoid the untrusted-certificate
+      warning. NOTE: if the generated access link starts with "http://",
+      change it to "https://" manually -- Fileglancer's auto_url scheme
+      behavior for HTTPS services is unverified.
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https marimo-https
+      --https-port "$FG_SERVICE_PORT" --port "$((FG_SERVICE_PORT + 1))"
+    parameters:
+      - flag: --ro-paths
+        name: Read-only paths
+        type: string
+        description: >-
+          Space-separated host paths bound read-only into the sandbox. Must
+          be leaf paths (e.g. /groups/scicompsoft), not bare autofs parents
+          (/groups, /nrs, /scratch). Defaults to conf/config.toml.
+      - flag: --work
+        name: Work directory
+        type: directory
+        exists: false
+        description: >-
+          Writable host directory bound to /work inside the sandbox. Defaults
+          to ./work.
