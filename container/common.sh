@@ -70,33 +70,33 @@ _PROJECT_ROOT="$(cd "$PWD/../.." && pwd)"
 
 # Load conf/config.toml if present, setting WORK, PORT, RO_PATHS from it
 # (only when not already set in the environment).
+#
+# Run via `pixi run --manifest-path .../container/app/pyproject.toml` rather
+# than a bare `python3` -- the host's system python3 is not to be relied on
+# (may be too old for tomllib, or simply absent from PATH); the
+# user-editable pixi project (see container/entrypoint.sh) is the one
+# Python this repo guarantees, so use it explicitly.
 _CONFIG="$_PROJECT_ROOT/conf/config.toml"
 [[ ! -f "$_CONFIG" ]] && _CONFIG="$_PROJECT_ROOT/conf/config.default.toml"
+_APP_MANIFEST="$_PROJECT_ROOT/container/app/pyproject.toml"
 if [[ -f "$_CONFIG" ]]; then
-    _toml_work="$(python3 -c "
-import tomllib, sys
+    _toml_all="$(pixi run --manifest-path "$_APP_MANIFEST" python3 -c "
+import tomllib
 with open('$_CONFIG', 'rb') as f:
     d = tomllib.load(f)
 print(d.get('work', ''))
-" 2>/dev/null)"
-    _toml_port="$(python3 -c "
-import tomllib, sys
-with open('$_CONFIG', 'rb') as f:
-    d = tomllib.load(f)
 print(d.get('port', ''))
-" 2>/dev/null)"
-    _toml_ro="$(python3 -c "
-import tomllib, sys
-with open('$_CONFIG', 'rb') as f:
-    d = tomllib.load(f)
 print(' '.join(d.get('ro_paths', [])))
 " 2>/dev/null)"
+    _toml_work="$(sed -n '1p' <<<"$_toml_all")"
+    _toml_port="$(sed -n '2p' <<<"$_toml_all")"
+    _toml_ro="$(sed -n '3p' <<<"$_toml_all")"
     [[ -n "$_toml_work" ]] && WORK="${WORK:-$_toml_work}"
     [[ -n "$_toml_port" ]] && PORT="${PORT:-$_toml_port}"
     [[ -n "$_toml_ro"   ]] && RO_PATHS="${RO_PATHS:-$_toml_ro}"
-    unset _toml_work _toml_port _toml_ro
+    unset _toml_all _toml_work _toml_port _toml_ro
 fi
-unset _CONFIG
+unset _CONFIG _APP_MANIFEST
 
 WORK="${WORK:-$_PROJECT_ROOT/work}"
 PORT="${PORT:-8080}"
@@ -110,6 +110,16 @@ mkdir -p "$WORK"/home "$WORK"/tmp
 # Seed the work dir with starter notebooks on first run.
 if [[ -d ../app ]] && ! compgen -G "$WORK/*.py" >/dev/null; then
     cp -n ../app/*.py "$WORK"/ 2>/dev/null || true
+fi
+
+# Seed the work dir with a user-editable pixi project (Python/marimo/
+# data-science packages) on first run. entrypoint.sh installs it into
+# $WORK/.pixi and runs Marimo from there instead of the image's read-only
+# baked-in env, so `pixi add <package>` (from a notebook or a shell) and
+# editing $WORK/pyproject.toml on the host both work without touching the
+# container image.
+if [[ -f ../app/pyproject.toml ]] && [[ ! -f "$WORK/pyproject.toml" ]]; then
+    cp -n ../app/pyproject.toml ../app/pixi.lock "$WORK"/ 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------

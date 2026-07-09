@@ -21,6 +21,7 @@ From: ubuntu:24.04
     pixi.toml /opt/app/pixi.toml
     pixi.lock /opt/app/pixi.lock
     container/app /opt/app/app
+    container/entrypoint.sh /opt/app/entrypoint.sh
 
 %post
     set -eux
@@ -63,6 +64,8 @@ From: ubuntu:24.04
         | bash -s -- --dir /opt/antigravity/bin || \
         echo "WARNING: Antigravity CLI install failed; continuing without it."
 
+    chmod +x /opt/app/entrypoint.sh
+
     # --- permissions: make everything world-readable/executable -----------
     chmod -R a+rX /opt/app/.pixi /opt/npm-global /opt/antigravity /opt/pixi
 
@@ -75,9 +78,10 @@ From: ubuntu:24.04
     export DISABLE_AUTOUPDATER=1
 
 %runscript
-    # Default action: serve Marimo against the writable /work bind mount.
-    # Extra args are passed through to `marimo edit`.
-    exec marimo edit / --headless --host 0.0.0.0 --port 8080 "$@"
+    # Default action: seed/build a user-editable pixi environment under /work
+    # (see entrypoint.sh) and serve Marimo from it against the writable /work
+    # bind mount. Extra args are passed through to `marimo edit`.
+    exec /opt/app/entrypoint.sh "$@"
 
 %labels
     Author Mark Kittisopikul

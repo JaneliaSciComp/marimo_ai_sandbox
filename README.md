@@ -20,7 +20,9 @@ and any files the agents create.
 ## Layout
 
 ```
-pixi.toml / pixi.lock         Python environment (python, marimo, nodejs, uv, git, ...)
+pixi.toml / pixi.lock         Agent-CLI-runtime env baked into the image (nodejs, uv, git, ...)
+app/pyproject.toml / pixi.lock  Seed for the user-editable Marimo/Python env (see below)
+entrypoint.sh                 Seeds + installs the pixi env under /work, then serves Marimo
 marimo.def                    Apptainer build recipe (installs everything at build time)
 Containerfile                 Podman/Docker build recipe
 build.sh / build_podman.sh    build scripts (for Apptainer or Podman image)
@@ -130,6 +132,30 @@ into `/work`. Attempts to modify the host filesystem fail by design.
 >
 > Verified: binding `/groups/scicompsoft:ro` makes writes there fail
 > (`Read-only file system`), while binding the parent `/groups:ro` does not.
+
+## Python / Marimo environment
+
+Marimo, Python, and the data-science packages (numpy, pandas, polars, altair)
+run out of a **user-editable pixi environment**, not the read-only image.
+`container/app/pyproject.toml` + `pixi.lock` are the seed for this project;
+on first run they're copied into `./work` (the one writable, host-visible
+directory) and installed into `./work/.pixi`. `container/entrypoint.sh` then
+serves Marimo from that environment instead of anything baked into the
+image.
+
+Because `./work` is a real directory on the host, the project is editable
+two ways:
+
+- **From inside the container** — Marimo's own "install missing package"
+  prompt (and a shell's `pixi add <package>` / `pixi remove <package>`) act
+  on this project, since `[tool.marimo.package_management] manager = "pixi"`
+  is set in the seeded `pyproject.toml`.
+- **From the host** — edit `./work/pyproject.toml` directly and re-run
+  `pixi run marimo ...`; the next container start reinstalls it.
+
+Once seeded, `./work/pyproject.toml` is never overwritten automatically (so
+your edits persist); delete it (and `./work/pixi.lock`, `./work/.pixi`) to
+reseed from the image's current version.
 
 ## Interactive / terminal use
 

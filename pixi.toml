@@ -7,20 +7,15 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [dependencies]
-python = "3.12.*"
-marimo = ">=0.23.13,<0.24"
+# Python/marimo/data-science packages live in the user-editable pixi project
+# under container/app/pyproject.toml instead (seeded into /work at container
+# startup -- see container/entrypoint.sh), so they are NOT baked in here.
 nodejs = ">=26.4.0,<26.5"   # runtime for the npm-based agent CLIs (claude, codex, gemini, ACP adapters)
 uv = ">=0.11.27,<0.12"          # fast installer, handy inside notebooks
 git = ">=2.55.0,<3"
 jq = ">=1.8.2,<2"          # JSON wrangling on the command line / in notebooks
 vim = ">=9.2.478,<10"         # editors available inside the sandbox
 nano = ">=9.1,<10"
-
-# Optional data-science extras commonly used from Marimo notebooks.
-numpy = ">=2.5.1,<3"
-pandas = ">=3.0.3,<4"
-polars = ">=1.42.1,<2"
-altair = ">=6.2.2,<7"
 
 [tasks]
 # --- Apptainer ---------------------------------------------------------------
@@ -36,8 +31,10 @@ shell-podman = "container/podman/shell.sh"
 # --- Defaults: apptainer if available, otherwise podman ----------------------
 build = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/build.sh; else container/podman/build.sh; fi'"
 
-# Convenience: print versions of everything bundled (runs in the pixi env).
-versions = "python --version && marimo --version && node --version"
+# Convenience: print versions of everything bundled. Node comes from this
+# pixi env; Python/marimo come from the user-editable env (see
+# container/app/pyproject.toml), installing it on first use if needed.
+versions = "node --version && pixi run --manifest-path container/app/pyproject.toml python --version && pixi run --manifest-path container/app/pyproject.toml marimo --version"
 
 # ro_paths/work/port are declared positional task arguments, each defaulting
 # to "" which defers to the matching env var / conf/config.toml (see
