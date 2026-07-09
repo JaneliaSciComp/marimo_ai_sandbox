@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # https-wrap.sh -- front the plain-HTTP Marimo server (started via the
-# existing `pixi run marimo-apptainer` launcher) with a Caddy TLS-terminating
-# reverse proxy.
+# existing `pixi run marimo-apptainer` or `marimo-podman` launcher --
+# apptainer if available, else podman, same fallback as [tasks.marimo] in
+# pixi.toml) with a Caddy TLS-terminating reverse proxy.
 #
 # Marimo itself has no TLS support, so this wrapper is the HTTPS layer. We
 # generate our own persistent self-signed cert with openssl and hand it to
@@ -34,8 +35,8 @@
 #   pixi run marimo-https --ro-paths "/groups/scicompsoft" --port 8080 --https-port 8443
 #
 # Accepts (same style as container/common.sh):
-#   --ro-paths PATHS   forwarded to marimo-apptainer
-#   --work PATH        forwarded to marimo-apptainer
+#   --ro-paths PATHS   forwarded to marimo-apptainer/marimo-podman
+#   --work PATH        forwarded to marimo-apptainer/marimo-podman
 #   --port PORT        internal Marimo port (default 8080)
 #   --https-port PORT  public TLS-terminating port Caddy listens on (default: an
 #                       arbitrary free port, auto-selected)
@@ -54,8 +55,8 @@ cd "$(dirname "$0")/.."   # project root
 # this runs as a Fileglancer service job), which its UI reads to explain a
 # wait before the service URL appears. Only "pulling_image" and "starting"
 # are recognized values (see fileglancer's jobfiles.py); we reuse them
-# loosely here since our own apptainer build (via marimo-apptainer, below)
-# plays the same role as an image pull.
+# loosely here since our own image build (via marimo-apptainer/marimo-podman,
+# below) plays the same role as an image pull.
 _set_phase() {
     [[ -n "${FG_PHASE_PATH:-}" ]] && printf '%s' "$1" > "$FG_PHASE_PATH" 2>/dev/null
     return 0
@@ -127,17 +128,30 @@ for ((i = 1; i <= $#; i++)); do
 done
 WORK_VAL="${WORK_VAL:-$(pwd)/work}"
 
-# Launch the existing marimo-apptainer task bound to the internal port, in
-# the background. `-- --host 127.0.0.1` (marimo's own flag, passed through
-# unmodified by marimo.sh/marimo.def) keeps it off 0.0.0.0 so it's only
-# reachable through the Caddy proxy, not directly. Its stdout/stderr is
-# tee'd to a log file so we can pull the access token out of Marimo's own
-# startup banner ("URL: http://localhost:<port>?access_token=...") below,
-# while still passing the output through to this script's own stdout.
-echo ">> Starting Marimo (building its Apptainer image first, if needed -- this can take several minutes on a fresh job) ..."
+# Pick the same backend the plain-HTTP `pixi run marimo` task would (see
+# [tasks.marimo] in pixi.toml): apptainer if it's on PATH, else podman. This
+# is a plain PATH check, not the pixi "apptainer" feature/environment -- the
+# https feature deliberately doesn't pull that in (see pixi.toml), so this
+# stays podman-only on hosts without apptainer instead of quietly requiring
+# it via pixi.
+if command -v apptainer &>/dev/null; then
+    MARIMO_TASK=marimo-apptainer
+else
+    MARIMO_TASK=marimo-podman
+fi
+
+# Launch the existing marimo-apptainer/marimo-podman task bound to the
+# internal port, in the background. `-- --host 127.0.0.1` (marimo's own
+# flag, passed through unmodified by marimo.sh/marimo.def/Containerfile)
+# keeps it off 0.0.0.0 so it's only reachable through the Caddy proxy, not
+# directly. Its stdout/stderr is tee'd to a log file so we can pull the
+# access token out of Marimo's own startup banner ("URL:
+# http://localhost:<port>?access_token=...") below, while still passing the
+# output through to this script's own stdout.
+echo ">> Starting Marimo via $MARIMO_TASK (building its image first, if needed -- this can take several minutes on a fresh job) ..."
 _set_phase pulling_image
 MARIMO_LOG="$(mktemp)"
-pixi run marimo-apptainer --port "$INTERNAL_PORT" "$@" -- --host 127.0.0.1 > >(tee "$MARIMO_LOG") 2>&1 &
+pixi run "$MARIMO_TASK" --port "$INTERNAL_PORT" "$@" -- --host 127.0.0.1 > >(tee "$MARIMO_LOG") 2>&1 &
 MARIMO_PID=$!
 
 cleanup() {

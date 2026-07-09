@@ -61,12 +61,18 @@ build-apptainer-pixi = "container/apptainer/build.sh"
 caddy = ">=2.8,<3"
 openssl = ">=3.5,<4"   # generates the persistent self-signed cert for https-wrap.sh
 
-# Fronts the plain-HTTP marimo-apptainer launch with a Caddy TLS-terminating
-# reverse proxy, using a persistent self-signed cert (see container/https-wrap.sh).
-# Declared under [feature.https.tasks] (rather than [tasks]) so `pixi run
-# marimo-https` always resolves to the "https" environment, which has caddy
-# and openssl -- without this it could otherwise pick an environment lacking
-# them and fail.
+# Fronts the plain-HTTP marimo-apptainer/marimo-podman launch (apptainer if
+# available, else podman -- same fallback as [tasks.marimo]) with a Caddy
+# TLS-terminating reverse proxy, using a persistent self-signed cert (see
+# container/https-wrap.sh). Declared under [feature.https.tasks] (rather than
+# [tasks]) so `pixi run marimo-https` always resolves to the "https"
+# environment, which has caddy and openssl -- without this it could
+# otherwise pick an environment lacking them and fail. Deliberately does NOT
+# pull in the "apptainer" feature (unlike the old apptainer-only version of
+# this task): that feature installs pixi's own apptainer package, which
+# would force apptainer even on podman-only hosts. https-wrap.sh instead
+# detects apptainer via the system PATH at runtime, exactly like
+# [tasks.marimo]'s own fallback.
 [feature.https.tasks.marimo-https]
 cmd = "container/https-wrap.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\" --port \"{{ port }}\" --https-port \"{{ https_port }}\""
 args = [
@@ -78,4 +84,4 @@ args = [
 
 [environments]
 apptainer = ["apptainer"]
-https = ["apptainer", "https"]
+https = ["https"]

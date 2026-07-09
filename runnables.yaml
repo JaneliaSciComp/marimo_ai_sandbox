@@ -49,7 +49,9 @@ runnables:
       in your browser's trust store to avoid the untrusted-certificate
       warning. The wrapper script publishes the service URL itself (rather
       than using Fileglancer's auto_url) so the link points at Caddy's HTTPS
-      port instead of Marimo's own plain-HTTP port.
+      port instead of Marimo's own plain-HTTP port. Runs Marimo itself via
+      apptainer if available on the host, otherwise falls back to Podman --
+      same fallback as the plain "marimo" pixi task.
     command: >-
       PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https
       container/https-wrap.sh --port "$FG_SERVICE_PORT"
