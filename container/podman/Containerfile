@@ -53,11 +53,16 @@ RUN mkdir -p /opt/antigravity/bin && \
 # copies into /work at container startup.
 COPY container/app /opt/app/app
 
+# Vendored Claude Code skill (marimo-team/marimo-pair) that entrypoint.sh
+# seeds into /work/.claude/skills on first run, so pairing an agent CLI with
+# the live notebook kernel works without a network fetch at runtime.
+COPY container/skills /opt/app/skills
+
 COPY container/entrypoint.sh /opt/app/entrypoint.sh
-RUN chmod +x /opt/app/entrypoint.sh
+RUN chmod +x /opt/app/entrypoint.sh /opt/app/skills/marimo-pair/scripts/*.sh
 
 # Set permissions: make everything world-readable/executable
-RUN chmod -R a+rX /opt/app/.pixi /opt/npm-global /opt/antigravity /opt/pixi
+RUN chmod -R a+rX /opt/app/.pixi /opt/npm-global /opt/antigravity /opt/pixi /opt/app/skills
 
 # Configure environment variables
 ENV PATH="$PIXI_ENV/bin:/opt/npm-global/bin:/opt/antigravity/bin:/opt/pixi/bin:$PATH"

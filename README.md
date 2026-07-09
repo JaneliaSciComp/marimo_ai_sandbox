@@ -157,6 +157,19 @@ Once seeded, `./work/pyproject.toml` is never overwritten automatically (so
 your edits persist); delete it (and `./work/pixi.lock`, `./work/.pixi`) to
 reseed from the image's current version.
 
+`entrypoint.sh` also seeds the [`marimo-pair`](https://marimo.io/blog/marimo-pair)
+Claude Code skill (vendored at `container/skills/marimo-pair`, from
+[marimo-team/marimo-pair](https://github.com/marimo-team/marimo-pair),
+Apache-2.0 -- see the `LICENSE` file alongside it -- baked into the image)
+into `./work/.claude/skills/marimo-pair`, so an agent CLI can pair-program
+against the live notebook kernel with no extra setup and no network fetch at
+runtime. This is a *project* skill: it's only picked up by an agent CLI whose
+working directory is `/work` (the notebook's own embedded terminal, or a
+shell started via `./shell.sh` after `cd /work`). Its `reference/finding-marimo.md`
+has been locally modified to point directly at this sandbox's pixi-managed
+Python environment (`/work/pyproject.toml`) instead of the generic
+uv/global/sandbox decision tree.
+
 ## Interactive / terminal use
 
 ```bash
