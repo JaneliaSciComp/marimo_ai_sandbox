@@ -34,6 +34,15 @@ work/                         runtime writable dir (created on first run; git-ig
 
 ## Build
 
+Building from source is **optional**. `./start.sh` (Apptainer) and
+`./marimo.sh` (Podman) both default to pulling the pre-built image published
+by `.github/workflows/publish-image.yml` at
+`ghcr.io/janeliascicomp/marimo_ai_sandbox:latest` (Apptainer converts it to a
+local `.sif` on first use) instead of building locally, falling back to a
+local build only if the pull fails and no local image/`.sif` exists yet. Use
+the steps below if you want to build from source anyway -- e.g. to test an
+unpublished change, or on a host without egress to ghcr.io.
+
 ### Apptainer Build
 
 Requires network access and unprivileged build support (`--fakeroot`). On

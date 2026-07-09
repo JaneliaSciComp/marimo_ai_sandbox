@@ -23,6 +23,16 @@
 #
 # See common.sh for WORK/PORT/RO_PATHS defaults, bind, and env setup.
 #
+# Image source: by default this pulls (and converts) the OCI image published
+# by .github/workflows/publish-image.yml
+# (ghcr.io/janeliascicomp/marimo_ai_sandbox) into a local .sif, instead of
+# building from source with `apptainer build --fakeroot` (slow -- no layer
+# cache, reinstalls pixi/npm/Antigravity from scratch every time). If the
+# pull fails (offline compute node, registry unreachable) and no local .sif
+# exists yet, it falls back to building marimo_sandbox.sif locally via
+# build.sh. Set SIF to point at an existing local .sif to skip the registry
+# entirely.
+#
 # Usage:
 #   ./start.sh                                  # serve Marimo on :8080
 #   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" ./start.sh
@@ -37,10 +47,21 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 SIF="${SIF:-marimo_sandbox.sif}"
+REMOTE_IMAGE="${REMOTE_IMAGE:-docker://ghcr.io/janeliascicomp/marimo_ai_sandbox:latest}"
 
 if [[ ! -f "$SIF" ]]; then
-    echo ">> Image '$SIF' not found -- building now ..."
-    bash ./build.sh
+    echo ">> Image '$SIF' not found -- pulling from registry ..."
+    TMP_SIF="${SIF}.tmp.$$"
+    trap 'rm -f "$TMP_SIF"' EXIT
+    if apptainer pull "$TMP_SIF" "$REMOTE_IMAGE"; then
+        mv "$TMP_SIF" "$SIF"
+        trap - EXIT
+    else
+        rm -f "$TMP_SIF"
+        trap - EXIT
+        echo ">> Pull failed -- building '$SIF' from source instead ..." >&2
+        bash ./build.sh
+    fi
 fi
 
 # shellcheck source=common.sh
