@@ -38,6 +38,10 @@ runnables:
         description: >-
           Writable host directory bound to /work inside the sandbox. Defaults
           to ./work.
+    resources:
+      cpus: 2
+      memory: "8 GB"
+      walltime: "08:00"
 
   - id: marimo-https
     name: Start Marimo Server (HTTPS)
@@ -75,3 +79,7 @@ runnables:
         description: >-
           Writable host directory bound to /work inside the sandbox. Defaults
           to ./work.
+    resources:
+      cpus: 2
+      memory: "8 GB"
+      walltime: "08:00"
