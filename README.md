@@ -142,6 +142,49 @@ into `/work`. Attempts to modify the host filesystem fail by design.
 > Verified: binding `/groups/scicompsoft:ro` makes writes there fail
 > (`Read-only file system`), while binding the parent `/groups:ro` does not.
 
+### Sandbox strength: what this does and doesn't protect against
+
+This is a **convenience** sandbox (protects the base image, scopes writable
+storage to `/work`) rather than a **security** sandbox — it does not isolate
+identity, network egress, or secrets. Concretely, what's in place and what
+isn't:
+
+- **Process visibility** — isolated. Apptainer runs with `--pid` (its own PID
+  namespace; without it, `ps aux` inside would show the whole compute node's
+  processes, not just this job's — verified). Podman isolates PIDs by
+  default, no flag needed.
+- **Resource limits** — partial. `container/entrypoint.sh` sets conservative
+  rlimits (`ulimit -f`/`-u`) inside the container. Native cgroup-based limits
+  (Apptainer's `--memory`/`--cpus`/`--pids-limit`, Podman's `--memory`) do
+  **not** work reliably on Janelia's current HPC setup — Apptainer hard-fails
+  without `systemd cgroups` enabled in `apptainer.conf`, and Podman silently
+  accepts `--memory` without enforcing it under
+  `--cgroup-manager=cgroupfs`. Both need infra changes outside this repo.
+  The `resources:` block in `runnables.yaml` (cpus/memory/walltime) is the
+  primary real control today, enforced by LSF at the job level.
+- **Network egress** — **unrestricted**. Outbound internet access from
+  inside the container is not blocked or allowlisted. `HTTP_PROXY`/
+  `HTTPS_PROXY`/`NO_PROXY` (and lowercase) are forwarded automatically if the
+  launching shell already has them set, but there's no proxy or firewall
+  provided by this repo — a compromised agent or a prompt-injected tool call
+  could reach the open internet.
+- **Identity** — **not isolated**. The container runs as your real
+  uid/gid with all your real HHMI/Janelia group memberships, not a scoped
+  service account. This is inherent to how Fileglancer/LSF jobs execute
+  today, not something a container launch script controls.
+- **Agent config dirs** (`~/.claude`, `~/.gemini`, `~/.codex`) — writable by
+  default, since agents legitimately write there (conversation history,
+  settings, hooks, a `setup-token` credential file). Set `RO_CLAUDE_CONFIG=1`
+  to bind them read-only instead, if you don't need those writes (e.g. using
+  an API key instead of a subscription login) and want to remove
+  self-tampering as a persistence vector.
+- **`/work` is a regular NFS bind, not `noexec`.** The user-editable pixi
+  environment (`container/app/pyproject.toml`, seeded by `entrypoint.sh`)
+  installs Python/marimo/every console script *into* `/work/.pixi` and execs
+  them from there — a `noexec` mount would break marimo itself. Properly
+  separating an exec-allowed subtree (the pixi env) from a `noexec` one
+  (notebooks/data) would be a real architecture change, not a flag.
+
 ## Python / Marimo environment
 
 Marimo, Python, and the data-science packages (numpy, pandas, polars, altair)
