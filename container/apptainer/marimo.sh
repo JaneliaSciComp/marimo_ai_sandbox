@@ -23,6 +23,14 @@
 #
 # See common.sh for WORK/PORT/RO_PATHS defaults, bind, and env setup.
 #
+# --cleanenv: unlike Podman/Docker, Apptainer's default is to inherit the
+# ENTIRE calling shell's environment, not just what's explicitly passed via
+# --env/--home -- silently bypassing common.sh's ENV_PAIRS allowlist
+# (verified: an arbitrary host env var leaks straight into an `apptainer
+# exec` with no --cleanenv, but not into the equivalent `podman run`).
+# --cleanenv makes this backend's behavior match Podman's: only ENV_PAIRS
+# (plus HOME/TMPDIR, set explicitly below) reaches the container.
+#
 # Image source: by default this pulls (and converts) the OCI image published
 # by .github/workflows/publish-image.yml
 # (ghcr.io/janeliascicomp/marimo_ai_sandbox) into a local .sif, instead of
@@ -74,6 +82,7 @@ echo ">> Serving Marimo on http://0.0.0.0:${PORT}  (work dir: $WORK)"
 echo ">> Read-only host binds:${RO_PATHS:- (none)}"
 exec apptainer run \
     --contain \
+    --cleanenv \
     --home "$WORK/home:/work/home" \
     --env TMPDIR=/work/tmp \
     "${BIND_ARGS[@]}" \
