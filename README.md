@@ -113,8 +113,10 @@ mounted; `/tmp` is a private tmpfs) and then:
 - binds `./work` → `/work` **read-write** (override with `WORK=/path` or `--work /path`);
 - sets `HOME=/work/home` (via `--home`, the only mechanism that works —
   apptainer refuses to set `HOME` via `--env`) and `TMPDIR=/work/tmp`, so
-  Marimo notebooks live in `/work` and agent config/cache (`~/.claude`,
-  `~/.codex`, ...) persist under `./work/home`;
+  Marimo notebooks live in `/work`; agent config dirs (`~/.claude`, ...) are
+  **not** mounted by default at all — see
+  [Sandbox strength](#sandbox-strength-what-this-does-and-doesnt-protect-against)
+  below;
 - leaves the container rootfs itself read-only.
 
 So an agent can read anything under the bound read-only paths but can only write
@@ -172,12 +174,17 @@ isn't:
   uid/gid with all your real HHMI/Janelia group memberships, not a scoped
   service account. This is inherent to how Fileglancer/LSF jobs execute
   today, not something a container launch script controls.
-- **Agent config dirs** (`~/.claude`, `~/.gemini`, `~/.codex`) — writable by
-  default, since agents legitimately write there (conversation history,
-  settings, hooks, a `setup-token` credential file). Set `RO_AGENT_CONFIG=1`
-  to bind all three read-only instead, if you don't need those writes (e.g.
-  using an API key instead of a subscription login) and want to remove
-  self-tampering as a persistence vector.
+- **Agent config dirs** (`~/.claude`, `~/.gemini`, `~/.codex`) are **not**
+  mounted by default at all — a fresh sandbox starts with no host
+  credentials/settings for any of them. Opt in per tool with
+  `CLAUDE_CONFIG`/`GEMINI_CONFIG`/`CODEX_CONFIG`, each set to `rw` (writable
+  — needed for things like a `setup-token` credential file, conversation
+  history, or session resume) or `ro` (read-only — e.g. if you're using an
+  API key instead of a subscription login, and want to remove
+  settings/hooks self-tampering as a persistence vector). Whether to seed
+  `/work/home/.claude` (etc.) by copying your real config there first,
+  instead of a live bind, is up to you — this repo doesn't do that
+  automatically.
 - **`/work` is a regular NFS bind, not `noexec`.** The user-editable pixi
   environment (`container/app/pyproject.toml`, seeded by `entrypoint.sh`)
   installs Python/marimo/every console script *into* `/work/.pixi` and execs
@@ -241,6 +248,13 @@ agy -p "..."
 Credentials are **never baked into the image**. Any host env var matching
 `ANTHROPIC_*`, `OPENAI_*`, `GEMINI_*`, `GOOGLE_*`, `*_API_KEY`, or `*_AUTH_TOKEN`
 is forwarded into the container by `start.sh` / `shell.sh`.
+
+If you'd rather use a subscription login (e.g. `claude setup-token`) than an
+API key, its credential file lives under `~/.claude`, which isn't mounted by
+default — set `CLAUDE_CONFIG=rw` (or `GEMINI_CONFIG`/`CODEX_CONFIG=rw` for
+the other CLIs) to bind it in. See
+[Sandbox strength](#sandbox-strength-what-this-does-and-doesnt-protect-against)
+for the `rw`/`ro` distinction.
 
 ## ACP (Agent Client Protocol)
 

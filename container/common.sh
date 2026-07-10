@@ -5,6 +5,9 @@
 #
 # Reads (uses defaults if unset):
 #   WORK, PORT, RO_PATHS
+#   CLAUDE_CONFIG, GEMINI_CONFIG, CODEX_CONFIG -- each "rw", "ro", or unset
+#   (default: unset, i.e. not mounted at all -- see the BIND_PAIRS section
+#   below for why)
 #
 # Also accepts on the caller's "$@" (highest precedence, overrides the env
 # var and conf/config.toml; consumed here, remaining args are left in "$@"
@@ -129,21 +132,30 @@ fi
 # ---------------------------------------------------------------------------
 BIND_PAIRS=("$WORK:/work:rw")
 
-# Agent credential dirs -- shared so tools inside the container are logged in.
-# Writable by default (agents legitimately write here: conversation
-# history, settings, hooks config, a setup-token credential file, etc.).
-# Set RO_AGENT_CONFIG=1 to mount all of them (.claude/.gemini/.codex)
-# read-only instead, e.g. if you're using an API key (no credential file
-# needed) and want to remove self-tampering (settings/hooks edits) as a
-# persistence vector for a compromised agent -- this is opt-in, not the
-# default, since it breaks those legitimate writes for anyone who does
-# need them.
-_ro_config=""
-[[ -n "${RO_AGENT_CONFIG:-}" ]] && _ro_config=":ro"
-[[ -d "$HOME/.claude" ]] && BIND_PAIRS+=("$HOME/.claude:/work/home/.claude$_ro_config")
-[[ -d "$HOME/.gemini" ]] && BIND_PAIRS+=("$HOME/.gemini:/work/home/.gemini$_ro_config")
-[[ -d "$HOME/.codex"  ]] && BIND_PAIRS+=("$HOME/.codex:/work/home/.codex$_ro_config")
-unset _ro_config
+# Agent credential dirs (.claude/.gemini/.codex) are NOT mounted by
+# default. They used to always be bound in (writable, or read-only via a
+# single RO_AGENT_CONFIG flag covering all three), which meant every launch
+# touched the host's real config -- for tools/credentials a given job might
+# not even use -- whether or not that job wanted it. Now each is opt-in and
+# independently controlled: set CLAUDE_CONFIG/GEMINI_CONFIG/CODEX_CONFIG to
+# "rw" or "ro" to bind that tool's real host config dir that way; leave
+# unset to skip it entirely (that tool starts with no config/credentials
+# inside the sandbox). Whether to seed /work/home/.claude (etc.) by copying
+# host config there first, instead of a live bind, is left to the user --
+# not done automatically here.
+_bind_agent_config() {
+    local var="$1" dir="$2" mode="${!1:-}"
+    case "$mode" in
+        rw) [[ -d "$HOME/$dir" ]] && BIND_PAIRS+=("$HOME/$dir:/work/home/$dir") ;;
+        ro) [[ -d "$HOME/$dir" ]] && BIND_PAIRS+=("$HOME/$dir:/work/home/$dir:ro") ;;
+        "") ;;
+        *) echo "note: ignoring $var=$mode (expected 'rw' or 'ro')" >&2 ;;
+    esac
+}
+_bind_agent_config CLAUDE_CONFIG .claude
+_bind_agent_config GEMINI_CONFIG .gemini
+_bind_agent_config CODEX_CONFIG  .codex
+unset -f _bind_agent_config
 
 # Read-only host paths, refusing bare autofs parents.
 for _p in $RO_PATHS; do
