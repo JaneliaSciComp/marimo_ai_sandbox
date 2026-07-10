@@ -158,7 +158,13 @@ unset _p
 ENV_PAIRS=()
 while IFS='=' read -r _name _; do
     case "$_name" in
-        ANTHROPIC_*|OPENAI_*|GEMINI_*|GOOGLE_*|*_API_KEY|*_AUTH_TOKEN)
+        # FG_SERVICE_TOKEN/FG_SERVICE_PORT/FG_HOSTNAME: Fileglancer's own
+        # per-job service variables (see
+        # https://fileglancer-docs.janelia.org/authoring/execution/). Our
+        # runnables.yaml command already uses FG_SERVICE_TOKEN as marimo's
+        # real token, so forwarding it lets entrypoint.sh see and reuse the
+        # same value instead of picking a different one.
+        ANTHROPIC_*|OPENAI_*|GEMINI_*|GOOGLE_*|*_API_KEY|*_AUTH_TOKEN|FG_SERVICE_TOKEN|FG_SERVICE_PORT|FG_HOSTNAME)
             ENV_PAIRS+=("$_name=${!_name}") ;;
     esac
 done < <(env)

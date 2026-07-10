@@ -23,6 +23,10 @@ For token-authenticated servers, prefer `MARIMO_TOKEN`.
 MARIMO_TOKEN=... bash scripts/execute-code.sh --url http://localhost:2718 -c "1 + 1"
 ```
 
+In the marimo-ai-sandbox container, `MARIMO_TOKEN` (and `MARIMO_URL`) are
+already set in the environment by `container/entrypoint.sh` -- no need to
+set them yourself; see [finding-marimo.md](finding-marimo.md).
+
 `--token` also works, but may expose the token in process listings. If both are
 present, `--token` overrides `MARIMO_TOKEN`. The script sends the token as
 `Authorization: Bearer ...` on session discovery and code execution requests.

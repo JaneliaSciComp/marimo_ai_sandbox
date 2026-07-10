@@ -49,5 +49,56 @@ if [[ ! -e "$SKILL_DST" && -d /opt/app/skills/marimo-pair ]]; then
     echo ">> Installed marimo-pair Claude Code skill to ./$SKILL_DST"
 fi
 
+# Resolve the port and token marimo will actually use, so we can export
+# MARIMO_URL/MARIMO_TOKEN for the marimo-pair skill (container/skills/marimo-pair)
+# instead of it having to hunt for either via discovery or --no-token.
+#
+# Scan "$@" for an already-specified --port/--token-password -- the plain
+# "marimo" Fileglancer runnable already passes both explicitly (see
+# runnables.yaml, which forwards FG_SERVICE_PORT/FG_SERVICE_TOKEN) -- and
+# respect them as-is rather than picking a different value.
+PORT="8080"
+TOKEN=""
+for ((i = 1; i <= $#; i++)); do
+    case "${!i}" in
+        --port)              j=$((i + 1)); [[ -n "${!j:-}" ]] && PORT="${!j}" ;;
+        --port=*)            PORT="${!i#--port=}" ;;
+        --token-password)    j=$((i + 1)); [[ -n "${!j:-}" ]] && TOKEN="${!j}" ;;
+        --token-password=*)  TOKEN="${!i#--token-password=}" ;;
+    esac
+done
+
+# No caller-supplied token (e.g. a plain local `./marimo.sh` with no
+# Fileglancer job wrapping it): prefer FG_SERVICE_TOKEN in case this is a
+# Fileglancer job that just didn't pass --token-password itself, else fall
+# back to a random token persisted under /work so local restarts reuse the
+# same value instead of a fresh, undiscoverable one every time (same idiom
+# https-wrap.sh already uses to persist its self-signed cert). Passed to
+# marimo explicitly rather than left to its own hidden default, so the
+# token is always known here.
+_extra_args=()
+if [[ -z "$TOKEN" ]]; then
+    if [[ -n "${FG_SERVICE_TOKEN:-}" ]]; then
+        TOKEN="$FG_SERVICE_TOKEN"
+    elif [[ -f .marimo-token ]]; then
+        TOKEN="$(cat .marimo-token)"
+    else
+        TOKEN="$(openssl rand -hex 16)"
+        printf '%s' "$TOKEN" > .marimo-token
+    fi
+    _extra_args+=(--token-password "$TOKEN")
+fi
+
+export MARIMO_TOKEN="$TOKEN"
+export MARIMO_URL="http://127.0.0.1:${PORT}"
+
+# Let a separately-launched shell (container/*/shell.sh, a fresh container
+# instance) pick these up too -- the `export` above only reaches marimo's
+# own process tree, not a sibling container sharing the same /work.
+cat > .marimo-pair.env <<ENVEOF
+MARIMO_TOKEN=$MARIMO_TOKEN
+MARIMO_URL=$MARIMO_URL
+ENVEOF
+
 exec pixi run --manifest-path pyproject.toml \
-    marimo edit / --headless --host 0.0.0.0 --port 8080 "$@"
+    marimo edit / --headless --host 0.0.0.0 --port 8080 "${_extra_args[@]}" "$@"

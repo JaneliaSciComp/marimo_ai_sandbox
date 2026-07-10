@@ -44,9 +44,8 @@ set -euo pipefail
 
 # Under set -e a failing command just kills the script with no explanation,
 # which previously looked like Marimo's image build itself failing (it
-# hadn't -- the failure was elsewhere, seconds after start; see the
-# ACCESS_TOKEN loop below). Log what actually failed and where before
-# `cleanup` (registered further down) runs.
+# hadn't -- the failure was elsewhere, seconds after start). Log what
+# actually failed and where before `cleanup` (registered further down) runs.
 trap 'echo ">> https-wrap: FATAL: \"$BASH_COMMAND\" failed (exit $?) at line $LINENO" >&2' ERR
 
 cd "$(dirname "$0")/.."   # project root
@@ -128,6 +127,25 @@ for ((i = 1; i <= $#; i++)); do
 done
 WORK_VAL="${WORK_VAL:-$(pwd)/work}"
 
+# Resolve marimo's token up front (same idiom as container/entrypoint.sh,
+# which this WORK_VAL/.marimo-token path is shared with -- WORK_VAL here and
+# /work inside the container are the same bind-mounted directory): prefer
+# FG_SERVICE_TOKEN if this is a Fileglancer job, else reuse/generate a
+# random token persisted at "$WORK_VAL/.marimo-token" so local restarts get
+# the same value. Passed through explicitly below so entrypoint.sh sees it
+# already set (via its own "$@" scan) instead of independently resolving
+# it, and so we know it here synchronously instead of scraping it out of
+# Marimo's stdout after the fact.
+if [[ -n "${FG_SERVICE_TOKEN:-}" ]]; then
+    TOKEN="$FG_SERVICE_TOKEN"
+elif [[ -f "$WORK_VAL/.marimo-token" ]]; then
+    TOKEN="$(cat "$WORK_VAL/.marimo-token")"
+else
+    mkdir -p "$WORK_VAL"
+    TOKEN="$(openssl rand -hex 16)"
+    printf '%s' "$TOKEN" > "$WORK_VAL/.marimo-token"
+fi
+
 # Pick the same backend the plain-HTTP `pixi run marimo` task would (see
 # [tasks.marimo] in pixi.toml): apptainer if it's on PATH, else podman. This
 # is a plain PATH check, not the pixi "apptainer" feature/environment -- the
@@ -144,20 +162,18 @@ fi
 # internal port, in the background. `-- --host 127.0.0.1` (marimo's own
 # flag, passed through unmodified by marimo.sh/marimo.def/Containerfile)
 # keeps it off 0.0.0.0 so it's only reachable through the Caddy proxy, not
-# directly. Its stdout/stderr is tee'd to a log file so we can pull the
-# access token out of Marimo's own startup banner ("URL:
-# http://localhost:<port>?access_token=...") below, while still passing the
-# output through to this script's own stdout.
+# directly. `--token-password "$TOKEN"` makes the token the one resolved
+# above, rather than a hidden random one only discoverable by scraping
+# stdout.
 echo ">> Starting Marimo via $MARIMO_TASK (building its image first, if needed -- this can take several minutes on a fresh job) ..."
 _set_phase pulling_image
-MARIMO_LOG="$(mktemp)"
-pixi run "$MARIMO_TASK" --port "$INTERNAL_PORT" "$@" -- --host 127.0.0.1 > >(tee "$MARIMO_LOG") 2>&1 &
+pixi run "$MARIMO_TASK" --port "$INTERNAL_PORT" "$@" -- --host 127.0.0.1 --token-password "$TOKEN" &
 MARIMO_PID=$!
 
 cleanup() {
     kill "$MARIMO_PID" "${CADDY_PID:-}" "${PUBLISHER_PID:-}" 2>/dev/null || true
     wait "$MARIMO_PID" "${CADDY_PID:-}" "${PUBLISHER_PID:-}" 2>/dev/null || true
-    rm -f "${CADDYFILE:-}" "$MARIMO_LOG"
+    rm -f "${CADDYFILE:-}"
 }
 trap cleanup EXIT INT TERM
 
@@ -180,27 +196,6 @@ else
     echo ">> Marimo hasn't responded yet after 30s (still building/starting); continuing -- Caddy will 502 until it's up."
 fi
 _set_phase starting
-
-# Pull the access token out of Marimo's banner so we can print an https://
-# URL (with the same hostname used for the cert) that's directly usable,
-# rather than the http://localhost:<port> one Marimo itself prints (which
-# doesn't reflect the outer hostname/port Caddy is actually serving on).
-# The `|| true` matters: under `set -e -o pipefail`, `grep -m1` finding no
-# match yet (the common case on early loop iterations, e.g. while Marimo's
-# image is still building) makes the whole assignment's pipeline fail,
-# which would otherwise abort the script on the very first iteration.
-echo ">> Waiting (up to 30s) for Marimo's access token ..."
-ACCESS_TOKEN=""
-for _ in $(seq 1 30); do
-    ACCESS_TOKEN="$(grep -m1 -oE 'access_token=[A-Za-z0-9_-]+' "$MARIMO_LOG" 2>/dev/null | head -1 | cut -d= -f2)" || true
-    [[ -n "$ACCESS_TOKEN" ]] && break
-    sleep 1
-done
-if [[ -n "$ACCESS_TOKEN" ]]; then
-    echo ">> Got Marimo's access token."
-else
-    echo ">> No access token found after 30s; the published URL will omit it."
-fi
 
 # Generate a persistent self-signed cert/key the first time (or whenever the
 # hostname changes, e.g. a new compute-node allocation), and reuse it on
@@ -225,11 +220,7 @@ else
     echo ">> Reusing existing HTTPS cert for ${HOST_NAME} ($CERT_FILE)"
 fi
 
-if [[ -n "$ACCESS_TOKEN" ]]; then
-    echo ">> HTTPS proxy: https://${HOST_NAME}:${HTTPS_PORT}?access_token=${ACCESS_TOKEN} -> 127.0.0.1:${INTERNAL_PORT}"
-else
-    echo ">> HTTPS proxy: https://${HOST_NAME}:${HTTPS_PORT} -> 127.0.0.1:${INTERNAL_PORT}"
-fi
+echo ">> HTTPS proxy: https://${HOST_NAME}:${HTTPS_PORT}?access_token=${TOKEN} -> 127.0.0.1:${INTERNAL_PORT}"
 echo ">> Cert: $CERT_FILE -- install it in your browser's trust store to avoid the untrusted-certificate warning."
 echo ">> Starting Caddy on :${HTTPS_PORT} ..."
 CADDYFILE="$(mktemp)"
@@ -250,42 +241,20 @@ CADDY_PID=$!
 # Publish the service URL ourselves (Fileglancer's auto_url always writes
 # http://$FG_HOSTNAME:$FG_SERVICE_PORT, which here would be Marimo's own
 # plain-HTTP port, not Caddy's TLS one) once Caddy is actually accepting
-# connections on HTTPS_PORT.
-#
-# This is intentionally independent of the short (30s) ACCESS_TOKEN wait
-# above: on a cold start, Marimo's image can still be building well past
-# that window (its whole point is only to make the *console* message above
-# usable immediately on a warm restart). Publish the URL as soon as Caddy is
-# up -- without the token if it isn't known yet -- then keep polling
-# MARIMO_LOG and re-publish with the token once it does appear, rather than
-# permanently omitting it.
+# connections on HTTPS_PORT. $TOKEN is already known up front now (resolved
+# before Marimo even started), so unlike before, there's nothing left to
+# wait on besides the port itself.
 if [[ -n "${SERVICE_URL_PATH:-}" ]]; then
     (
-        _https_up=0
-        _token="$ACCESS_TOKEN"
         for _ in $(seq 1 1800); do
-            if [[ "$_https_up" -eq 0 ]] && (exec 3<>"/dev/tcp/127.0.0.1/$HTTPS_PORT") 2>/dev/null; then
-                _https_up=1
-            fi
-            if [[ -z "$_token" ]]; then
-                _token="$(grep -m1 -oE 'access_token=[A-Za-z0-9_-]+' "$MARIMO_LOG" 2>/dev/null | head -1 | cut -d= -f2)" || true
-            fi
-            if [[ "$_https_up" -eq 1 ]]; then
-                _suffix=""
-                [[ -n "$_token" ]] && _suffix="?access_token=${_token}"
-                printf 'https://%s:%s/%s' "${FG_HOSTNAME:-$HOST_NAME}" "$HTTPS_PORT" "$_suffix" > "$SERVICE_URL_PATH"
-                if [[ -n "$_token" ]]; then
-                    echo ">> Published service URL (with access token) to $SERVICE_URL_PATH"
-                    exit 0
-                fi
+            if (exec 3<>"/dev/tcp/127.0.0.1/$HTTPS_PORT") 2>/dev/null; then
+                printf 'https://%s:%s/?access_token=%s' "${FG_HOSTNAME:-$HOST_NAME}" "$HTTPS_PORT" "$TOKEN" > "$SERVICE_URL_PATH"
+                echo ">> Published service URL to $SERVICE_URL_PATH"
+                exit 0
             fi
             sleep 1
         done
-        if [[ "$_https_up" -eq 0 ]]; then
-            echo "https-wrap: port $HTTPS_PORT never opened; service URL not published." >&2
-        else
-            echo "https-wrap: access token never appeared after 30 min; service URL published without it." >&2
-        fi
+        echo "https-wrap: port $HTTPS_PORT never opened; service URL not published." >&2
     ) &
     PUBLISHER_PID=$!
 fi

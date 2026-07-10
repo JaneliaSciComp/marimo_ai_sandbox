@@ -15,13 +15,26 @@ pixi run --manifest-path /work/pyproject.toml python -c '...'
 ```
 
 A marimo server for the current notebook is normally already running
-(started by `entrypoint.sh` on container startup, headless, with a
-token) -- discover it first (see
-[execution-context.md](execution-context.md)) rather than starting a second
-one. If you do need to start a fresh one, keep the same manifest path and
-add `--no-token` only if the user explicitly wants local-registry
-auto-discovery; otherwise pass `--url`/`MARIMO_TOKEN` to target the existing
-token-protected server.
+(started by `entrypoint.sh` on container startup, headless, with a token) --
+**skip discovery entirely**: `entrypoint.sh` already exports `MARIMO_URL`
+(always `http://127.0.0.1:<port>`) and `MARIMO_TOKEN` in this environment,
+resolved from `FG_SERVICE_TOKEN` when running as a Fileglancer job, or a
+token persisted at `/work/.marimo-token` otherwise -- either way, the exact
+token protecting the running server. Target it directly:
+
+```sh
+bash scripts/execute-code.sh --url "$MARIMO_URL" -c "1 + 1"
+```
+
+`execute-code.sh` already reads `MARIMO_TOKEN` from the environment (see
+[execution-context.md](execution-context.md)) -- no `--token`/`MARIMO_TOKEN=`
+needed on the command line. If you opened a shell via `container/*/shell.sh`
+rather than marimo's own embedded terminal, both variables are still set
+(sourced from `/work/.marimo-pair.env`, written by the same `entrypoint.sh`).
+
+Only start a fresh marimo instance if the user explicitly asks for one; keep
+the same manifest path, and add `--no-token` only if they specifically want
+local-registry auto-discovery instead.
 
 ## Elsewhere
 
