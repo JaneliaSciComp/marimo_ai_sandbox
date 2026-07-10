@@ -174,9 +174,9 @@ isn't:
   today, not something a container launch script controls.
 - **Agent config dirs** (`~/.claude`, `~/.gemini`, `~/.codex`) — writable by
   default, since agents legitimately write there (conversation history,
-  settings, hooks, a `setup-token` credential file). Set `RO_CLAUDE_CONFIG=1`
-  to bind them read-only instead, if you don't need those writes (e.g. using
-  an API key instead of a subscription login) and want to remove
+  settings, hooks, a `setup-token` credential file). Set `RO_AGENT_CONFIG=1`
+  to bind all three read-only instead, if you don't need those writes (e.g.
+  using an API key instead of a subscription login) and want to remove
   self-tampering as a persistence vector.
 - **`/work` is a regular NFS bind, not `noexec`.** The user-editable pixi
   environment (`container/app/pyproject.toml`, seeded by `entrypoint.sh`)

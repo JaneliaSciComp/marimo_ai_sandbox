@@ -132,13 +132,14 @@ BIND_PAIRS=("$WORK:/work:rw")
 # Agent credential dirs -- shared so tools inside the container are logged in.
 # Writable by default (agents legitimately write here: conversation
 # history, settings, hooks config, a setup-token credential file, etc.).
-# Set RO_CLAUDE_CONFIG=1 to mount them read-only instead, e.g. if you're
-# using an API key (no credential file needed) and want to remove
-# self-tampering (settings/hooks edits) as a persistence vector for a
-# compromised agent -- this is opt-in, not the default, since it breaks
-# those legitimate writes for anyone who does need them.
+# Set RO_AGENT_CONFIG=1 to mount all of them (.claude/.gemini/.codex)
+# read-only instead, e.g. if you're using an API key (no credential file
+# needed) and want to remove self-tampering (settings/hooks edits) as a
+# persistence vector for a compromised agent -- this is opt-in, not the
+# default, since it breaks those legitimate writes for anyone who does
+# need them.
 _ro_config=""
-[[ -n "${RO_CLAUDE_CONFIG:-}" ]] && _ro_config=":ro"
+[[ -n "${RO_AGENT_CONFIG:-}" ]] && _ro_config=":ro"
 [[ -d "$HOME/.claude" ]] && BIND_PAIRS+=("$HOME/.claude:/work/home/.claude$_ro_config")
 [[ -d "$HOME/.gemini" ]] && BIND_PAIRS+=("$HOME/.gemini:/work/home/.gemini$_ro_config")
 [[ -d "$HOME/.codex"  ]] && BIND_PAIRS+=("$HOME/.codex:/work/home/.codex$_ro_config")
