@@ -130,9 +130,19 @@ fi
 BIND_PAIRS=("$WORK:/work:rw")
 
 # Agent credential dirs -- shared so tools inside the container are logged in.
-[[ -d "$HOME/.claude" ]] && BIND_PAIRS+=("$HOME/.claude:/work/home/.claude")
-[[ -d "$HOME/.gemini" ]] && BIND_PAIRS+=("$HOME/.gemini:/work/home/.gemini")
-[[ -d "$HOME/.codex"  ]] && BIND_PAIRS+=("$HOME/.codex:/work/home/.codex")
+# Writable by default (agents legitimately write here: conversation
+# history, settings, hooks config, a setup-token credential file, etc.).
+# Set RO_CLAUDE_CONFIG=1 to mount them read-only instead, e.g. if you're
+# using an API key (no credential file needed) and want to remove
+# self-tampering (settings/hooks edits) as a persistence vector for a
+# compromised agent -- this is opt-in, not the default, since it breaks
+# those legitimate writes for anyone who does need them.
+_ro_config=""
+[[ -n "${RO_CLAUDE_CONFIG:-}" ]] && _ro_config=":ro"
+[[ -d "$HOME/.claude" ]] && BIND_PAIRS+=("$HOME/.claude:/work/home/.claude$_ro_config")
+[[ -d "$HOME/.gemini" ]] && BIND_PAIRS+=("$HOME/.gemini:/work/home/.gemini$_ro_config")
+[[ -d "$HOME/.codex"  ]] && BIND_PAIRS+=("$HOME/.codex:/work/home/.codex$_ro_config")
+unset _ro_config
 
 # Read-only host paths, refusing bare autofs parents.
 for _p in $RO_PATHS; do
@@ -164,7 +174,15 @@ while IFS='=' read -r _name _; do
         # runnables.yaml command already uses FG_SERVICE_TOKEN as marimo's
         # real token, so forwarding it lets entrypoint.sh see and reuse the
         # same value instead of picking a different one.
-        ANTHROPIC_*|OPENAI_*|GEMINI_*|GOOGLE_*|*_API_KEY|*_AUTH_TOKEN|FG_SERVICE_TOKEN|FG_SERVICE_PORT|FG_HOSTNAME)
+        #
+        # HTTP_PROXY/HTTPS_PROXY/NO_PROXY (+ lowercase): forwarded so that
+        # *if* the launching shell already has an egress-restricting proxy
+        # configured, it carries into the container automatically instead
+        # of being silently dropped. This container has no egress
+        # restriction of its own -- outbound network access is unrestricted
+        # by default (see README) -- these vars only help if such a proxy
+        # already exists upstream.
+        ANTHROPIC_*|OPENAI_*|GEMINI_*|GOOGLE_*|*_API_KEY|*_AUTH_TOKEN|FG_SERVICE_TOKEN|FG_SERVICE_PORT|FG_HOSTNAME|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|http_proxy|https_proxy|no_proxy)
             ENV_PAIRS+=("$_name=${!_name}") ;;
     esac
 done < <(env)
