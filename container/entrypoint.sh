@@ -16,6 +16,33 @@
 # targets this same project.
 set -euo pipefail
 
+# Conservative per-process resource limits (rlimits, not cgroups). Neither
+# backend's native cgroup-based limits (Apptainer's --memory/--cpus/
+# --pids-limit, Podman's --memory) work reliably on this host: Apptainer
+# hard-fails ("cannot use cgroups - 'systemd cgroups' is not enabled in
+# apptainer.conf") and Podman silently no-ops (accepts --memory, doesn't
+# enforce it) under rootless/--cgroup-manager=cgroupfs -- both need an
+# apptainer.conf/cgroup-v2-delegation change only Janelia IT can make. rlimits
+# set here are a real, always-available fallback since they need no cgroup
+# delegation, and -- set from INSIDE the container, not by wrapping the
+# outer apptainer/podman launch command -- only constrain marimo/pixi/the
+# agent CLIs, not the container runtime itself (wrapping the outer launch in
+# `ulimit -v ...` was tested and crashed Apptainer's own Go runtime, which
+# legitimately maps large virtual address space it doesn't actually use).
+#
+# -f (file size) and -u (max user processes/threads, the closest rlimit to
+# a pids-limit) are used since they don't depend on a process's own memory-
+# mapping behavior. -v/-t (virtual memory/CPU time) are deliberately left
+# unset here for the same reason the outer-wrap attempt failed -- picking a
+# safe number needs iterative tuning against real workloads, not a guess.
+# The `resources:` block in runnables.yaml (cpus/memory/walltime) remains
+# the primary control, enforced by LSF at the job level.
+# ulimit -f's block size is NOT the POSIX-standard 512 bytes on this
+# image -- verified empirically (/proc/<pid>/limits showed exactly double
+# the intended byte count): it's 1024 here. Computed accordingly.
+ulimit -f 20971520   # 20 GiB (1024-byte blocks on this image, verified)
+ulimit -u 2048         # matches Podman's own --pids-limit default
+
 cd /work
 
 # Seed the pixi project on first run; never clobber user edits.
