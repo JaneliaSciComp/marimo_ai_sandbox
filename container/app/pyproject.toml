@@ -1,0 +1,25 @@
+[project]
+name = "marimo-ai-sandbox-notebooks"
+description = "User-editable pixi environment for Marimo notebooks (seeded into /work)"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.dependencies]
+python = "3.12.*"
+marimo = ">=0.23.13,<0.24"
+numpy = ">=2.5.1,<3"
+pandas = ">=3.0.3,<4"
+polars = ">=1.42.1,<2"
+altair = ">=6.2.2,<7"
+
+[tool.pixi.tasks]
+edit = "marimo edit /work --headless --host 0.0.0.0 --port 8080"
+
+# Tell Marimo's own "install missing package" feature to shell out to
+# `pixi add`/`pixi remove` against this project instead of pip/uv.
+[tool.marimo.package_management]
+manager = "pixi"

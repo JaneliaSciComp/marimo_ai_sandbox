@@ -47,11 +47,22 @@ RUN mkdir -p /opt/antigravity/bin && \
         | bash -s -- --dir /opt/antigravity/bin || \
         echo "WARNING: Antigravity CLI install failed; continuing without it."
 
-# Copy starter notebook/app files (build context is the project root; see build.sh)
+# Copy starter notebook/app files (build context is the project root; see
+# build.sh). Includes pyproject.toml/pixi.lock: the seed for a user-editable
+# pixi project (Python/marimo/data-science packages) that entrypoint.sh
+# copies into /work at container startup.
 COPY container/app /opt/app/app
 
+# Vendored Claude Code skill (marimo-team/marimo-pair) that entrypoint.sh
+# seeds into /work/.claude/skills on first run, so pairing an agent CLI with
+# the live notebook kernel works without a network fetch at runtime.
+COPY container/skills /opt/app/skills
+
+COPY container/entrypoint.sh /opt/app/entrypoint.sh
+RUN chmod +x /opt/app/entrypoint.sh /opt/app/skills/marimo-pair/scripts/*.sh
+
 # Set permissions: make everything world-readable/executable
-RUN chmod -R a+rX /opt/app/.pixi /opt/npm-global /opt/antigravity /opt/pixi
+RUN chmod -R a+rX /opt/app/.pixi /opt/npm-global /opt/antigravity /opt/pixi /opt/app/skills
 
 # Configure environment variables
 ENV PATH="$PIXI_ENV/bin:/opt/npm-global/bin:/opt/antigravity/bin:/opt/pixi/bin:$PATH"
@@ -61,7 +72,9 @@ ENV DISABLE_AUTOUPDATER=1
 # Expose default Marimo port
 EXPOSE 8080
 
-# Default entrypoint: serve Marimo with the file browser rooted at / so that
-# all bind-mounted host paths (e.g. /groups/scicompsoft) are directly visible.
-# New notebooks should be saved under /work, which is the container's CWD.
-ENTRYPOINT ["marimo", "edit", "/", "--headless", "--host", "0.0.0.0", "--port", "8080"]
+# Default entrypoint: seeds/builds a user-editable pixi environment under
+# /work (see entrypoint.sh) and serves Marimo from it, with the file browser
+# rooted at / so that all bind-mounted host paths (e.g. /groups/scicompsoft)
+# are directly visible. New notebooks should be saved under /work, which is
+# the container's CWD.
+ENTRYPOINT ["/opt/app/entrypoint.sh"]
