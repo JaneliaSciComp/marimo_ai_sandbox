@@ -9,6 +9,9 @@
 #
 # --cleanenv: see start.sh -- without it Apptainer inherits the entire
 # calling environment, bypassing common.sh's ENV_PAIRS allowlist.
+# --pid: see start.sh -- without it, `ps aux` in here shows the whole
+# compute node's processes, not just this job's. Podman needs no
+# equivalent; it isolates PIDs by default.
 #
 # Usage:
 #   ./shell.sh
@@ -36,6 +39,7 @@ ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(--env "$e"); done
 exec apptainer shell \
     --contain \
     --cleanenv \
+    --pid \
     --home "$WORK/home:/work/home" \
     --env TMPDIR=/work/tmp \
     "${BIND_ARGS[@]}" \

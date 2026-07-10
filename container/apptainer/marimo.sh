@@ -31,6 +31,21 @@
 # --cleanenv makes this backend's behavior match Podman's: only ENV_PAIRS
 # (plus HOME/TMPDIR, set explicitly below) reaches the container.
 #
+# --pid: unlike Podman (which isolates the PID namespace by default -- no
+# change needed there), Apptainer's default is to SHARE the host PID
+# namespace, so `ps aux` inside the container shows every process on the
+# compute node, not just this job's. --pid gives it its own namespace
+# (verified unprivileged: `ps aux` inside then shows only the container's
+# own ~2 processes). Podman's own cgroup/CPU/memory limit flags
+# (--memory/--cpus/--pids-limit) and Apptainer's equivalents are NOT used
+# here despite being available: Apptainer's hard-fail ("cannot use cgroups
+# - 'systemd cgroups' is not enabled in apptainer.conf") and Podman's
+# silent no-op (accepts --memory, does not enforce it) under this host's
+# rootless/cgroupfs-manager setup make both unreliable without an
+# apptainer.conf/cgroup-v2-delegation change only Janelia IT can make. The
+# `resources:` block in runnables.yaml (cpus/memory/walltime) is the real
+# resource control today, enforced by LSF at the job level instead.
+#
 # Image source: by default this pulls (and converts) the OCI image published
 # by .github/workflows/publish-image.yml
 # (ghcr.io/janeliascicomp/marimo_ai_sandbox) into a local .sif, instead of
@@ -83,6 +98,7 @@ echo ">> Read-only host binds:${RO_PATHS:- (none)}"
 exec apptainer run \
     --contain \
     --cleanenv \
+    --pid \
     --home "$WORK/home:/work/home" \
     --env TMPDIR=/work/tmp \
     "${BIND_ARGS[@]}" \
