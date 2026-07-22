@@ -1,0 +1,37 @@
+name: Marimo AI Sandbox
+description: >-
+  Reactive Marimo notebook server bundled with AI coding-agent CLIs (Claude
+  Code, Codex, Gemini, Antigravity) inside a read-only Apptainer/Podman
+  sandbox; only a single work directory is writable.
+requirements:
+  - apptainer
+  - pixi
+runnables:
+  - id: marimo
+    name: Start Marimo Server
+    type: service
+    auto_url: true
+    service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
+    working_dir: repo
+    description: >-
+      Serves the Marimo notebook server. The host filesystem is mounted
+      read-only except for the work directory, which holds notebooks and
+      agent config/cache.
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-apptainer
+      --port "$FG_SERVICE_PORT" --token-password "$FG_SERVICE_TOKEN"
+    parameters:
+      - flag: --ro-paths
+        name: Read-only paths
+        type: string
+        description: >-
+          Space-separated host paths bound read-only into the sandbox. Must
+          be leaf paths (e.g. /groups/scicompsoft), not bare autofs parents
+          (/groups, /nrs, /scratch). Defaults to conf/config.toml.
+      - flag: --work
+        name: Work directory
+        type: directory
+        exists: false
+        description: >-
+          Writable host directory bound to /work inside the sandbox. Defaults
+          to ./work.
