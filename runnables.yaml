@@ -16,7 +16,10 @@ runnables:
     description: >-
       Serves the Marimo notebook server. The host filesystem is mounted
       read-only except for the work directory, which holds notebooks and
-      agent config/cache.
+      agent config/cache. Pulls the pre-built image published by
+      .github/workflows/publish-image.yml (ghcr.io/janeliascicomp/marimo_ai_sandbox)
+      instead of building from source; falls back to a local build only if
+      the pull fails and no local image exists yet.
     command: >-
       PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-apptainer
       --port "$FG_SERVICE_PORT" --token-password "$FG_SERVICE_TOKEN"
@@ -35,3 +38,48 @@ runnables:
         description: >-
           Writable host directory bound to /work inside the sandbox. Defaults
           to ./work.
+    resources:
+      cpus: 2
+      memory: "8 GB"
+      walltime: "08:00"
+
+  - id: marimo-https
+    name: Start Marimo Server (HTTPS)
+    type: service
+    working_dir: repo
+    description: >-
+      Serves the Marimo notebook server behind a local Caddy TLS-terminating
+      reverse proxy using Caddy's self-signed --internal-certs (no cert
+      management required, and independent of Fileglancer). On first run,
+      the wrapper script copies Caddy's local CA root cert into this job's
+      work directory (caddy-local-ca.crt) and prints its path -- install it
+      in your browser's trust store to avoid the untrusted-certificate
+      warning. The wrapper script publishes the service URL itself (rather
+      than using Fileglancer's auto_url) so the link points at Caddy's HTTPS
+      port instead of Marimo's own plain-HTTP port. Runs Marimo itself via
+      apptainer if available on the host, otherwise falls back to Podman --
+      same fallback as the plain "marimo" pixi task. Both pull the pre-built
+      image from ghcr.io/janeliascicomp/marimo_ai_sandbox rather than
+      building from source (see the "marimo" runnable above).
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https
+      container/https-wrap.sh --port "$FG_SERVICE_PORT"
+    parameters:
+      - flag: --ro-paths
+        name: Read-only paths
+        type: string
+        description: >-
+          Space-separated host paths bound read-only into the sandbox. Must
+          be leaf paths (e.g. /groups/scicompsoft), not bare autofs parents
+          (/groups, /nrs, /scratch). Defaults to conf/config.toml.
+      - flag: --work
+        name: Work directory
+        type: directory
+        exists: false
+        description: >-
+          Writable host directory bound to /work inside the sandbox. Defaults
+          to ./work.
+    resources:
+      cpus: 2
+      memory: "8 GB"
+      walltime: "08:00"

@@ -7,6 +7,12 @@
 # See start.sh for the read-only model and the autofs/NFS caveat.
 # See common.sh for WORK/RO_PATHS defaults, bind, and env setup.
 #
+# --cleanenv: see start.sh -- without it Apptainer inherits the entire
+# calling environment, bypassing common.sh's ENV_PAIRS allowlist.
+# --pid: see start.sh -- without it, `ps aux` in here shows the whole
+# compute node's processes, not just this job's. Podman needs no
+# equivalent; it isolates PIDs by default.
+#
 # Usage:
 #   ./shell.sh
 #   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" WORK=/scratch/$USER/work ./shell.sh
@@ -28,8 +34,12 @@ source "../common.sh"
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(--bind "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(--env "$e"); done
 
+[[ -f "$WORK/.marimo-pair.env" ]] && ENV_ARGS+=(--env-file "$WORK/.marimo-pair.env")
+
 exec apptainer shell \
     --contain \
+    --cleanenv \
+    --pid \
     --home "$WORK/home:/work/home" \
     --env TMPDIR=/work/tmp \
     "${BIND_ARGS[@]}" \
