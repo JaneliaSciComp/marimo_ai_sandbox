@@ -6,6 +6,8 @@ on:
     paths:
       - "container/podman/Containerfile"
       - "container/app/**"
+      - "container/skills/**"
+      - "container/entrypoint.sh"
       - "pixi.toml"
       - "pixi.lock"
       - ".github/workflows/publish-image.yml"
