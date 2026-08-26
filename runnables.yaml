@@ -37,6 +37,30 @@ runnables:
       memory: "1 GB"
       walltime: "00:10"
 
+  - id: hello-world-bare
+    name: "Diagnostic: Hello World (bare echo, no pixi)"
+    type: job
+    working_dir: repo
+    requirements: []
+    description: >-
+      Even more minimal than "hello-world": no pixi at all, just `echo`, and
+      requirements is overridden to empty so Fileglancer's own
+      apptainer/pixi tool-check preamble is skipped entirely for this
+      runnable. Writes each checkpoint directly to trace.log (not stdout)
+      since LSF buffers stdout until job completion on this cluster. Used to
+      isolate whether a stall happens even with the simplest possible
+      command and no requirement checks at all.
+    command: >-
+      bash -c '
+      T="$FG_WORK_DIR/trace.log";
+      echo "$(date +%T) [$(hostname)] job started, pid=$$" >> "$T";
+      echo "Hello World" >> "$T";
+      echo "$(date +%T) [$(hostname)] done" >> "$T" '
+    resources:
+      cpus: 1
+      memory: "1 GB"
+      walltime: "00:10"
+
   - id: marimo
     name: Start Marimo Server
     type: service
