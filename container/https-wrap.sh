@@ -159,15 +159,25 @@ else
 fi
 
 # Launch the existing marimo-apptainer/marimo-podman task bound to the
-# internal port, in the background. `-- --host 127.0.0.1` (marimo's own
-# flag, passed through unmodified by marimo.sh/marimo.def/Containerfile)
-# keeps it off 0.0.0.0 so it's only reachable through the Caddy proxy, not
-# directly. `--token-password "$TOKEN"` makes the token the one resolved
-# above, rather than a hidden random one only discoverable by scraping
-# stdout.
+# internal port, in the background. `--host 127.0.0.1` (marimo's own flag,
+# passed through unmodified by marimo.sh/marimo.def/Containerfile) keeps it
+# off 0.0.0.0 so it's only reachable through the Caddy proxy, not directly.
+# `--token-password "$TOKEN"` makes the token the one resolved above, rather
+# than a hidden random one only discoverable by scraping stdout.
+#
+# No `--` separator here (unlike [tasks.marimo]/[tasks.shell] in pixi.toml,
+# which need one to mark the end of their own templated positional args):
+# marimo-apptainer/marimo-podman are bare-command tasks with no declared
+# args, so a literal "--" isn't consumed by pixi, common.sh, marimo.sh, or
+# entrypoint.sh -- it rides straight through into marimo's own Click-based
+# CLI, which treats "--" as "stop parsing options, everything after this is
+# positional." That silently swallowed --host/--token-password as ignored
+# positional args, so marimo fell back to generating its own random token
+# instead of honoring $TOKEN -- confirmed: the token this published in
+# SERVICE_URL_PATH didn't match the token marimo actually enforced.
 echo ">> Starting Marimo via $MARIMO_TASK (building its image first, if needed -- this can take several minutes on a fresh job) ..."
 _set_phase pulling_image
-pixi run "$MARIMO_TASK" --port "$INTERNAL_PORT" "$@" -- --host 127.0.0.1 --token-password "$TOKEN" &
+pixi run "$MARIMO_TASK" --port "$INTERNAL_PORT" "$@" --host 127.0.0.1 --token-password "$TOKEN" &
 MARIMO_PID=$!
 
 cleanup() {
