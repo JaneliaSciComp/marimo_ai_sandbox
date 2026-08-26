@@ -75,9 +75,15 @@ fi
 
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(-v "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(-e "$e"); done
+# --device nvidia.com/gpu=all: CDI (Container Device Interface), not the
+# older --gpus flag -- this host's GPU access is provisioned via
+# nvidia-container-toolkit's CDI spec (/etc/cdi/nvidia.yaml), which rootless
+# Podman supports directly with no extra runtime flags needed.
+GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--device nvidia.com/gpu=all)
 
 echo ">> Serving Marimo on http://0.0.0.0:${PORT}  (work dir: $WORK)"
 echo ">> Read-only host binds:${RO_PATHS:- (none)}"
+[[ "$HAS_GPU" == "1" ]] && echo ">> GPU detected -- passing --device nvidia.com/gpu=all"
 exec podman run \
     --rm -it \
     --read-only \
@@ -91,4 +97,5 @@ exec podman run \
     -w /work \
     "${BIND_ARGS[@]}" \
     "${ENV_ARGS[@]}" \
+    "${GPU_ARGS[@]}" \
     "$IMAGE" --port "$PORT" "$@"

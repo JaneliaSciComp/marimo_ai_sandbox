@@ -92,9 +92,11 @@ source "../common.sh"
 
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(--bind "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(--env "$e"); done
+GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--nv)
 
 echo ">> Serving Marimo on http://0.0.0.0:${PORT}  (work dir: $WORK)"
 echo ">> Read-only host binds:${RO_PATHS:- (none)}"
+[[ "$HAS_GPU" == "1" ]] && echo ">> GPU detected -- passing --nv"
 exec apptainer run \
     --contain \
     --cleanenv \
@@ -103,4 +105,5 @@ exec apptainer run \
     --env TMPDIR=/work/tmp \
     "${BIND_ARGS[@]}" \
     "${ENV_ARGS[@]}" \
+    "${GPU_ARGS[@]}" \
     "$SIF" --port "$PORT" "$@"
