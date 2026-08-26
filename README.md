@@ -29,6 +29,7 @@ build.sh / build_podman.sh    build scripts (for Apptainer or Podman image)
 start.sh / run_podman.sh        serve Marimo with the read-only sandbox model
 shell.sh / shell_podman.sh    interactive shell in the sandbox (drive the agent CLIs)
 bsub-wrapper/bin/bsub         opt-in bsub wrapper -- see "Submitting LSF jobs" below
+app/AGENTS.md                 seeded into /work; CLAUDE.md/GEMINI.md symlink to it
 app/agents_demo.py            starter Marimo notebook that calls an agent via subprocess
 work/                         runtime writable dir (created on first run; git-ignored)
 ```
@@ -104,6 +105,22 @@ Security → Manage certificates → Authorities → Import; Firefox: Settings �
 Privacy & Security → Certificates → View Certificates → Authorities →
 Import). This is entirely self-contained — it doesn't depend on Fileglancer
 to obtain a cert.
+
+### GPU passthrough (automatic)
+
+`common.sh` detects a GPU at launch time (`nvidia-smi -L`) and passes it
+through automatically — no flag needed, and no harm on a non-GPU node:
+
+- **Apptainer:** adds `--nv`.
+- **Podman:** adds `--device nvidia.com/gpu=all` (CDI-based, matching this
+  host's `nvidia-container-toolkit` setup).
+
+Verified end-to-end on an LSF `gpu_short` job: `apptainer exec --nv
+marimo_sandbox.sif nvidia-smi` correctly sees the node's GPU. Podman's CDI
+path is wired the same way but was blocked in testing by a stale
+`/etc/cdi/nvidia.yaml` on the test node (a Janelia IT-side CDI cache
+issue, not something this repo controls) — the `--device` invocation
+itself is correct for a host with a current CDI spec.
 
 ### Read-only model
 
@@ -236,6 +253,14 @@ has been locally modified to point directly at this sandbox's pixi-managed
 Python environment (`/work/pyproject.toml`) instead of the generic
 uv/global/sandbox decision tree.
 
+`entrypoint.sh` also seeds `AGENTS.md` into `./work` (with `CLAUDE.md`/
+`GEMINI.md` symlinked to it, so Claude Code/Codex/Gemini CLI all read the
+same content) — a short note telling an agent CLI to fetch
+[hpc.int.janelia.org/docs/ai-agent-hints](https://hpc.int.janelia.org/docs/ai-agent-hints)
+before touching the Janelia cluster (LSF, storage tiers, GPU queues,
+common agent mistakes), since that page is kept current while any
+pasted/cached copy goes stale.
+
 ## Interactive / terminal use
 
 ```bash
@@ -330,9 +355,11 @@ To drive these agents from an external ACP client (e.g. Zed):
 - **Antigravity self-update:** `agy` tries to self-update in the background; on
   the read-only rootfs that write fails harmlessly. `DISABLE_AUTOUPDATER=1` is
   set in the image to suppress it.
-- **Tool versions** are pinned only loosely (`*`) in `pixi.toml` for conda
-  packages and unpinned for npm packages, so rebuilding picks up upstream
-  updates. Pin them if you need byte-for-byte reproducibility.
+- **Tool versions**: conda packages in `pixi.toml`/`container/app/pyproject.toml`
+  are pinned to a version range (e.g. `>=26.6.0,<26.7`) and locked via
+  `pixi.lock`; npm agent CLIs are unpinned, so rebuilding always picks up
+  their latest release. Bump the conda ranges and re-run `pixi update` for
+  newer versions; there's no equivalent lock for the npm packages.
 - **Marimo auth:** `marimo edit` prints a per-session access token; use it (or
   `--token-password`) when exposing the port beyond localhost.
 - **HTTPS:** plain `marimo`/`start.sh` serve HTTP only. Use `pixi run
