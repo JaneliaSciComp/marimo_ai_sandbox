@@ -17,13 +17,21 @@ runnables:
       shell command in the project's default environment. Used to isolate
       whether job stalls seen on other runnables are caused by this repo's
       container/pixi-env logic, or are more fundamental to how jobs execute
-      in this Fileglancer/LSF setup. Prints timestamps before and after so
-      elapsed wall-clock time is visible even if the environment is slow.
+      in this Fileglancer/LSF setup. Writes each checkpoint directly to
+      trace.log in the job's work dir (not stdout), since LSF appears to
+      buffer stdout/stderr until job completion on this cluster -- a file
+      write is the only way to see live progress instead of guessing from a
+      log that stays empty until the very end.
     command: >-
-      PATH="$HOME/.pixi/bin:$PATH" bash -c '
-      echo "=== before pixi run: $(date) on $(hostname) ===";
-      pixi run bash -c "echo hello world; date; hostname; whoami; pwd";
-      echo "=== after pixi run: $(date) ===" '
+      bash -c '
+      T="$FG_WORK_DIR/trace.log";
+      echo "$(date +%T) [$(hostname)] job started, pid=$$" >> "$T";
+      export PATH="$HOME/.pixi/bin:$PATH";
+      echo "$(date +%T) [$(hostname)] PATH set, about to check pixi" >> "$T";
+      echo "$(date +%T) [$(hostname)] command -v pixi = $(command -v pixi)" >> "$T";
+      echo "$(date +%T) [$(hostname)] about to run: pixi run bash -c echo-hello" >> "$T";
+      pixi run bash -c "echo hello world; date; hostname; whoami; pwd" >> "$T" 2>&1;
+      echo "$(date +%T) [$(hostname)] pixi run exited with status $?" >> "$T" '
     resources:
       cpus: 1
       memory: "1 GB"
