@@ -94,6 +94,11 @@ BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(--bind "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(--env "$e"); done
 GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--nv)
 
+# See common.sh's write_bsub_runner_apptainer and container/bsub-wrapper/
+# bin/bsub: when enabled, a wrapped `bsub ... -- <cmd>` re-enters this exact
+# sandbox on whatever node LSF schedules it to.
+[[ "$ENABLE_BSUB" == "1" ]] && write_bsub_runner_apptainer "$SIF"
+
 echo ">> Serving Marimo on http://0.0.0.0:${PORT}  (work dir: $WORK)"
 echo ">> Read-only host binds:${RO_PATHS:- (none)}"
 [[ "$HAS_GPU" == "1" ]] && echo ">> GPU detected -- passing --nv"

@@ -53,6 +53,11 @@ ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(-e "$e"); done
 # See run_podman.sh for why CDI (--device nvidia.com/gpu=all) rather than --gpus.
 GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--device nvidia.com/gpu=all)
 
+# See common.sh's write_bsub_runner_podman and container/bsub-wrapper/bin/
+# bsub: when enabled, a wrapped `bsub ... -- <cmd>` re-enters this exact
+# sandbox on whatever node LSF schedules it to.
+[[ "$ENABLE_BSUB" == "1" ]] && write_bsub_runner_podman "$IMAGE"
+
 exec podman run \
     --rm -it \
     --read-only \

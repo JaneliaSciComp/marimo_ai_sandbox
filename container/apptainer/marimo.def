@@ -23,6 +23,7 @@ From: ubuntu:24.04
     container/app /opt/app/app
     container/skills /opt/app/skills
     container/entrypoint.sh /opt/app/entrypoint.sh
+    container/bsub-wrapper/bin /opt/bsub-wrapper/bin
 
 %post
     set -eux
@@ -67,12 +68,19 @@ From: ubuntu:24.04
 
     chmod +x /opt/app/entrypoint.sh /opt/app/skills/marimo-pair/scripts/*.sh
 
+    # --- sandboxed bsub wrapper (see container/bsub-wrapper/bin/bsub) ------
+    # Always present on PATH, but a no-op unless the launching host script
+    # was started with --enable-bsub/ENABLE_BSUB=1 (see common.sh), which is
+    # the only thing that bind-mounts the real LSF client and its env vars
+    # into the container.
+    chmod +x /opt/bsub-wrapper/bin/bsub
+
     # --- permissions: make everything world-readable/executable -----------
     chmod -R a+rX /opt/app/.pixi /opt/npm-global /opt/antigravity /opt/pixi /opt/app/skills
 
 %environment
     export PIXI_ENV=/opt/app/.pixi/envs/default
-    export PATH="$PIXI_ENV/bin:/opt/npm-global/bin:/opt/antigravity/bin:/opt/pixi/bin:$PATH"
+    export PATH="/opt/bsub-wrapper/bin:$PIXI_ENV/bin:/opt/npm-global/bin:/opt/antigravity/bin:/opt/pixi/bin:$PATH"
     export MARIMO_HEADLESS=1
     # Disable self-update / telemetry chatter that would fight the read-only fs.
     export NPM_CONFIG_UPDATE_NOTIFIER=false

@@ -61,11 +61,18 @@ COPY container/skills /opt/app/skills
 COPY container/entrypoint.sh /opt/app/entrypoint.sh
 RUN chmod +x /opt/app/entrypoint.sh /opt/app/skills/marimo-pair/scripts/*.sh
 
+# Sandboxed bsub wrapper (see container/bsub-wrapper/bin/bsub) -- always
+# present on PATH, but a no-op unless the launching host script was started
+# with --enable-bsub/ENABLE_BSUB=1 (see common.sh), which is the only thing
+# that bind-mounts the real LSF client and its env vars into the container.
+COPY container/bsub-wrapper/bin /opt/bsub-wrapper/bin
+RUN chmod +x /opt/bsub-wrapper/bin/bsub
+
 # Set permissions: make everything world-readable/executable
 RUN chmod -R a+rX /opt/app/.pixi /opt/npm-global /opt/antigravity /opt/pixi /opt/app/skills
 
 # Configure environment variables
-ENV PATH="$PIXI_ENV/bin:/opt/npm-global/bin:/opt/antigravity/bin:/opt/pixi/bin:$PATH"
+ENV PATH="/opt/bsub-wrapper/bin:$PIXI_ENV/bin:/opt/npm-global/bin:/opt/antigravity/bin:/opt/pixi/bin:$PATH"
 ENV MARIMO_HEADLESS=1
 ENV DISABLE_AUTOUPDATER=1
 

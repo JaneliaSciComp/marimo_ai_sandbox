@@ -37,6 +37,11 @@ GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--nv)
 
 [[ -f "$WORK/.marimo-pair.env" ]] && ENV_ARGS+=(--env-file "$WORK/.marimo-pair.env")
 
+# See common.sh's write_bsub_runner_apptainer and container/bsub-wrapper/
+# bin/bsub: when enabled, a wrapped `bsub ... -- <cmd>` re-enters this exact
+# sandbox on whatever node LSF schedules it to.
+[[ "$ENABLE_BSUB" == "1" ]] && write_bsub_runner_apptainer "$SIF"
+
 exec apptainer shell \
     --contain \
     --cleanenv \

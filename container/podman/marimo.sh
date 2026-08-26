@@ -81,6 +81,11 @@ ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(-e "$e"); done
 # Podman supports directly with no extra runtime flags needed.
 GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--device nvidia.com/gpu=all)
 
+# See common.sh's write_bsub_runner_podman and container/bsub-wrapper/bin/
+# bsub: when enabled, a wrapped `bsub ... -- <cmd>` re-enters this exact
+# sandbox on whatever node LSF schedules it to.
+[[ "$ENABLE_BSUB" == "1" ]] && write_bsub_runner_podman "$IMAGE"
+
 echo ">> Serving Marimo on http://0.0.0.0:${PORT}  (work dir: $WORK)"
 echo ">> Read-only host binds:${RO_PATHS:- (none)}"
 [[ "$HAS_GPU" == "1" ]] && echo ">> GPU detected -- passing --device nvidia.com/gpu=all"
