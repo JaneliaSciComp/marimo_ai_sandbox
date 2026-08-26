@@ -41,7 +41,7 @@ runnables:
           Writable host directory bound to /work inside the sandbox. Defaults
           to ./work.
     resources:
-      cpus: 2
+      cpus: 8
       memory: "8 GB"
       walltime: "08:00"
 
@@ -96,7 +96,7 @@ runnables:
           Public TLS port Caddy listens on. Defaults to an arbitrary free
           port chosen automatically at start.
     resources:
-      cpus: 2
+      cpus: 8
       memory: "8 GB"
       walltime: "08:00"
 
@@ -128,6 +128,6 @@ runnables:
     command: >-
       /opt/app/entrypoint.sh --port "$FG_SERVICE_PORT" --token-password "$FG_SERVICE_TOKEN"
     resources:
-      cpus: 2
+      cpus: 8
       memory: "8 GB"
       walltime: "08:00"
