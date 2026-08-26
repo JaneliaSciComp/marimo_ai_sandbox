@@ -174,6 +174,20 @@ done
 unset _p
 
 # ---------------------------------------------------------------------------
+# HAS_GPU -- whether to pass GPU-passthrough flags to this backend's launch
+# command (apptainer's --nv / podman's --device nvidia.com/gpu=all -- see
+# marimo.sh/shell.sh in each backend dir). Detected at launch time rather
+# than assumed, so the exact same command works unchanged on GPU and
+# non-GPU nodes: `nvidia-smi -L` (vs. a bare `nvidia-smi`) fails fast and
+# silently if no driver/GPU is present, instead of nvidia-smi's multi-line
+# table on success.
+# ---------------------------------------------------------------------------
+HAS_GPU=0
+if command -v nvidia-smi &>/dev/null && nvidia-smi -L &>/dev/null; then
+    HAS_GPU=1
+fi
+
+# ---------------------------------------------------------------------------
 # ENV_PAIRS -- one "NAME=VALUE" entry per forwarded variable.
 # Callers convert with:  -e "$pair"       (podman)
 #                        --env "$pair"    (apptainer)

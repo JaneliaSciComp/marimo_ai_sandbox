@@ -50,6 +50,8 @@ fi
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(-v "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(-e "$e"); done
 [[ -f "$WORK/.marimo-pair.env" ]] && ENV_ARGS+=(--env-file "$WORK/.marimo-pair.env")
+# See run_podman.sh for why CDI (--device nvidia.com/gpu=all) rather than --gpus.
+GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--device nvidia.com/gpu=all)
 
 exec podman run \
     --rm -it \
@@ -65,4 +67,5 @@ exec podman run \
     -w /work \
     "${BIND_ARGS[@]}" \
     "${ENV_ARGS[@]}" \
+    "${GPU_ARGS[@]}" \
     "$IMAGE"

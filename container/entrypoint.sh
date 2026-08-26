@@ -48,6 +48,12 @@ cd /work
 # Seed the pixi project on first run; never clobber user edits.
 cp -n /opt/app/app/pyproject.toml /opt/app/app/pixi.lock . 2>/dev/null || true
 
+# Seed agent instructions pointing at the Janelia HPC "AI Agent Hints" page
+# (AGENTS.md, the cross-tool convention picked up by Codex/Antigravity;
+# CLAUDE.md/GEMINI.md are symlinks to it so Claude Code and Gemini CLI read
+# the same note). Copy-if-absent, same as the pyproject.toml seed above.
+cp -n -d /opt/app/app/AGENTS.md /opt/app/app/CLAUDE.md /opt/app/app/GEMINI.md . 2>/dev/null || true
+
 # Prefer the locked, reproducible install; fall back to a fresh resolve if
 # the user has hand-edited pyproject.toml without updating pixi.lock.
 pixi install --manifest-path pyproject.toml --locked ||

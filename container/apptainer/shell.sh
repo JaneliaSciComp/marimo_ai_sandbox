@@ -33,6 +33,7 @@ source "../common.sh"
 
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(--bind "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(--env "$e"); done
+GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--nv)
 
 [[ -f "$WORK/.marimo-pair.env" ]] && ENV_ARGS+=(--env-file "$WORK/.marimo-pair.env")
 
@@ -44,5 +45,6 @@ exec apptainer shell \
     --env TMPDIR=/work/tmp \
     "${BIND_ARGS[@]}" \
     "${ENV_ARGS[@]}" \
+    "${GPU_ARGS[@]}" \
     --pwd /work \
     "$SIF"

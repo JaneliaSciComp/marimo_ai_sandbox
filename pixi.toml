@@ -10,12 +10,12 @@ version = "0.1.0"
 # Python/marimo/data-science packages live in the user-editable pixi project
 # under container/app/pyproject.toml instead (seeded into /work at container
 # startup -- see container/entrypoint.sh), so they are NOT baked in here.
-nodejs = ">=26.4.0,<26.5"   # runtime for the npm-based agent CLIs (claude, codex, gemini, ACP adapters)
-uv = ">=0.11.27,<0.12"          # fast installer, handy inside notebooks
+nodejs = ">=26.6.0,<26.7"   # runtime for the npm-based agent CLIs (claude, codex, gemini, ACP adapters)
+uv = ">=0.12.5,<0.13"          # fast installer, handy inside notebooks
 git = ">=2.55.0,<3"
 jq = ">=1.8.2,<2"          # JSON wrangling on the command line / in notebooks
-vim = ">=9.2.478,<10"         # editors available inside the sandbox
-nano = ">=9.1,<10"
+vim = ">=9.2.785,<10"         # editors available inside the sandbox
+nano = ">=9.2,<10"
 
 [tasks]
 # --- Apptainer ---------------------------------------------------------------
@@ -52,14 +52,14 @@ cmd = "bash -c 'if command -v apptainer &>/dev/null; then container/apptainer/sh
 args = [{ arg = "ro_paths", default = "" }, { arg = "work", default = "" }]
 
 [feature.apptainer.dependencies]
-apptainer = ">=1.5.2,<2"
+apptainer = ">=1.5.3,<2"
 
 [feature.apptainer.tasks]
 build-apptainer-pixi = "container/apptainer/build.sh"
 
 [feature.https.dependencies]
-caddy = ">=2.8,<3"
-openssl = ">=3.5,<4"   # generates the persistent self-signed cert for https-wrap.sh
+caddy = ">=2.11.4,<3"
+openssl = ">=3.6.3,<4"   # generates the persistent self-signed cert for https-wrap.sh
 
 # Fronts the plain-HTTP marimo-apptainer/marimo-podman launch (apptainer if
 # available, else podman -- same fallback as [tasks.marimo]) with a Caddy
