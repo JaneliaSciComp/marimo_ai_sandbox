@@ -64,8 +64,18 @@ export CONTAINERS_STORAGE_CONF="$STORAGE_CONF"
 # shellcheck source=common.sh
 source "../common.sh"
 
+# Reports coarse progress to Fileglancer's phase file (set only when this
+# runs as a Fileglancer job -- see https-wrap.sh, which does the same), so
+# the UI can show "pulling image"/"starting" instead of looking hung during
+# a slow first-time pull. A no-op everywhere else.
+_set_phase() {
+    [[ -n "${FG_PHASE_PATH:-}" ]] && printf '%s' "$1" > "$FG_PHASE_PATH" 2>/dev/null
+    return 0
+}
+
 if ! podman image exists "$IMAGE" &>/dev/null; then
     echo ">> Image '$IMAGE' not found locally -- pulling from registry ..."
+    _set_phase pulling_image
     if ! podman pull "$IMAGE"; then
         echo ">> Pull failed -- building '$LOCAL_IMAGE' from source instead ..." >&2
         IMAGE="$LOCAL_IMAGE"
@@ -89,6 +99,7 @@ GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--device nvidia.com/gpu=all)
 echo ">> Serving Marimo on http://0.0.0.0:${PORT}  (work dir: $WORK)"
 echo ">> Read-only host binds:${RO_PATHS:- (none)}"
 [[ "$HAS_GPU" == "1" ]] && echo ">> GPU detected -- passing --device nvidia.com/gpu=all"
+_set_phase starting
 exec podman run \
     --rm -it \
     --read-only \

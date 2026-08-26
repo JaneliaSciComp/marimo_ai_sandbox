@@ -72,8 +72,18 @@ cd "$(dirname "$0")"
 SIF="${SIF:-marimo_sandbox.sif}"
 REMOTE_IMAGE="${REMOTE_IMAGE:-docker://ghcr.io/janeliascicomp/marimo_ai_sandbox:latest}"
 
+# Reports coarse progress to Fileglancer's phase file (set only when this
+# runs as a Fileglancer job -- see https-wrap.sh, which does the same), so
+# the UI can show "pulling image"/"starting" instead of looking hung during
+# a slow first-time pull. A no-op everywhere else.
+_set_phase() {
+    [[ -n "${FG_PHASE_PATH:-}" ]] && printf '%s' "$1" > "$FG_PHASE_PATH" 2>/dev/null
+    return 0
+}
+
 if [[ ! -f "$SIF" ]]; then
     echo ">> Image '$SIF' not found -- pulling from registry ..."
+    _set_phase pulling_image
     TMP_SIF="${SIF}.tmp.$$"
     trap 'rm -f "$TMP_SIF"' EXIT
     if apptainer pull "$TMP_SIF" "$REMOTE_IMAGE"; then
@@ -102,6 +112,7 @@ GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--nv)
 echo ">> Serving Marimo on http://0.0.0.0:${PORT}  (work dir: $WORK)"
 echo ">> Read-only host binds:${RO_PATHS:- (none)}"
 [[ "$HAS_GPU" == "1" ]] && echo ">> GPU detected -- passing --nv"
+_set_phase starting
 exec apptainer run \
     --contain \
     --cleanenv \

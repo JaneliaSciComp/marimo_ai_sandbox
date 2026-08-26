@@ -20,6 +20,8 @@ runnables:
       .github/workflows/publish-image.yml (ghcr.io/janeliascicomp/marimo_ai_sandbox)
       instead of building from source; falls back to a local build only if
       the pull fails and no local image exists yet.
+    pre_run: >-
+      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
       PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-apptainer
       --port "$FG_SERVICE_PORT" --token-password "$FG_SERVICE_TOKEN"
@@ -66,6 +68,8 @@ runnables:
       same fallback as the plain "marimo" pixi task. Both pull the pre-built
       image from ghcr.io/janeliascicomp/marimo_ai_sandbox rather than
       building from source (see the "marimo" runnable above).
+    pre_run: >-
+      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
       PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https
       container/https-wrap.sh --port "$FG_SERVICE_PORT"
@@ -109,16 +113,20 @@ runnables:
       compare against the "marimo" runnable above. Known gaps versus that
       wrapper-script approach: no dynamic --ro-paths validation (autofs-parent
       rejection), no GPU detection, no bsub support, and no curated env-var
-      allowlist -- bind_paths below is static. Unverified until tested: does
-      Fileglancer forward FG_SERVICE_TOKEN/FG_SERVICE_PORT into the
-      container's environment automatically, and does bind_paths support
-      parameter substitution.
+      allowlist -- bind_paths below is static. Confirmed by inspecting the
+      generated LSF script: Fileglancer runs this via "apptainer exec", not
+      "apptainer run", so the image's baked-in ENTRYPOINT
+      (/opt/app/entrypoint.sh, see container/podman/Containerfile) is NOT
+      invoked automatically -- command below must name it explicitly. Also
+      confirmed: Fileglancer auto-manages FG_PHASE_PATH (pulling_image/
+      starting) for this launch style itself, unlike the command-based
+      "marimo"/"marimo-https" runnables above.
     container: docker://ghcr.io/janeliascicomp/marimo_ai_sandbox:latest
     container_args: "--contain --cleanenv --pid"
     bind_paths:
       - "./work:/work"
     command: >-
-      --port "$FG_SERVICE_PORT" --token-password "$FG_SERVICE_TOKEN"
+      /opt/app/entrypoint.sh --port "$FG_SERVICE_PORT" --token-password "$FG_SERVICE_TOKEN"
     resources:
       cpus: 2
       memory: "8 GB"
