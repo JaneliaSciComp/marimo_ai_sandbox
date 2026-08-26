@@ -120,7 +120,12 @@ runnables:
       invoked automatically -- command below must name it explicitly. Also
       confirmed: Fileglancer auto-manages FG_PHASE_PATH (pulling_image/
       starting) for this launch style itself, unlike the command-based
-      "marimo"/"marimo-https" runnables above.
+      "marimo"/"marimo-https" runnables above. Also confirmed: apptainer's
+      --bind requires the source directory to already exist -- unlike the
+      wrapper-script runnables, where common.sh's `mkdir -p "$WORK"/home
+      "$WORK"/tmp` creates it, nothing creates ./work for this native launch
+      path, so pre_run creates it explicitly.
+    pre_run: 'mkdir -p "$FG_WORK_DIR/work"'
     container: docker://ghcr.io/janeliascicomp/marimo_ai_sandbox:latest
     container_args: "--contain --cleanenv --pid"
     bind_paths:
