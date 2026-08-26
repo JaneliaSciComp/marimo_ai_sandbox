@@ -279,10 +279,11 @@ Kerberos via `sssd-kcm`, and fails inside a rootless Podman container
 after fixing UID mapping (`--userns=keep-id`), bind-mounting the SSSD/KCM
 sockets, and granting all capabilities/unconfined seccomp — this is a
 deeper incompatibility between rootless Podman's isolation and this
-cluster's Kerberos-based LSF auth, not a bug in the wrapper itself. Use
-`--enable-bsub` with the Apptainer backend only until this is root-caused
-(likely needs Janelia IT input on what `eauth`/Kerberos actually requires
-inside a container's network/mount namespace).
+cluster's Kerberos-based LSF auth, not a bug in the wrapper itself.
+`--enable-bsub` therefore **refuses to start on the Podman backend** (a
+hard error, not just a warning) until this is root-caused -- likely needs
+Janelia IT input on what `eauth`/Kerberos actually requires inside a
+container's network/mount namespace.
 
 `$WORK` must be on shared storage (`/groups` or `/nrs`, not `/scratch`, which
 is local to a single node) — the wrapper writes a small re-entry script

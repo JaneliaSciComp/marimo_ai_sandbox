@@ -299,56 +299,20 @@ write_bsub_runner_apptainer() {
     chmod +x "$runner"
 }
 
+# KNOWN ISSUE (see README's "Submitting LSF jobs" section): LSF's eauth
+# fails inside a rootless Podman container ("External authentication
+# failed") -- confirmed independent of UID mapping, capabilities, and the
+# SSSD/KCM sockets tried so far. Hard-error here (consistent with the
+# other --enable-bsub misconfiguration checks above: missing /misc/lsf,
+# $WORK under /scratch) rather than let every `bsub` call inside the
+# container hit this cryptic error at submission time. A working
+# runner-generator implementation (mirroring write_bsub_runner_apptainer,
+# plus the Janelia podman storage-redirect setup a standalone job needs)
+# existed at this commit's parent in git history, if eauth is ever
+# root-caused and this needs re-enabling.
 write_bsub_runner_podman() {
-    local image="$1" runner="$WORK/.bsub-wrapper-runner.sh" a
-    # KNOWN ISSUE (see README's "Submitting LSF jobs" section): LSF's eauth
-    # fails inside a rootless Podman container ("External authentication
-    # failed") -- confirmed independent of UID mapping, capabilities, and
-    # the SSSD/KCM sockets tried so far. Warn rather than silently letting
-    # every `bsub` call hit this cryptic error.
-    echo "WARNING: the bsub wrapper is only verified working on the Apptainer backend --" >&2
-    echo "         LSF's eauth is known to fail inside a rootless Podman container." >&2
-    {
-        echo "#!/usr/bin/env bash"
-        echo "set -euo pipefail"
-        # The submitted job runs standalone on whatever bare host LSF
-        # picks -- NOT inside a shell that already has the Janelia
-        # storage-redirect env this repo's own podman/marimo.sh sets up
-        # (default podman storage lives on NFS under ~/.local/share/
-        # containers, which doesn't support the xattrs overlay needs).
-        # Duplicated here (rather than sourced) since podman/common.sh
-        # aren't guaranteed to exist/resolve the same way outside this
-        # container's own checkout.
-        cat <<'PODMAN_SETUP'
-if [[ -z "${XDG_RUNTIME_DIR:-}" ]] || [[ ! -d "$XDG_RUNTIME_DIR" ]]; then
-    export XDG_RUNTIME_DIR="/tmp/podman-run-$(id -u)"
-    mkdir -p "$XDG_RUNTIME_DIR"
-    chmod 700 "$XDG_RUNTIME_DIR"
-fi
-PODMAN_STORAGE_ROOT="${PODMAN_STORAGE_ROOT:-/scratch/$(id -un)/podman-storage}"
-PODMAN_RUN_ROOT="${PODMAN_RUN_ROOT:-/tmp/podman-run-$(id -u)/run}"
-mkdir -p "$PODMAN_STORAGE_ROOT" "$PODMAN_RUN_ROOT"
-STORAGE_CONF="$(mktemp /tmp/podman-storage-XXXXXX.conf)"
-trap 'rm -f "$STORAGE_CONF"' EXIT
-cat > "$STORAGE_CONF" <<EOF
-[storage]
-driver = "overlay"
-graphRoot = "$PODMAN_STORAGE_ROOT"
-runRoot  = "$PODMAN_RUN_ROOT"
-
-[storage.options.overlay]
-mount_program = "/usr/bin/fuse-overlayfs"
-ignore_chown_errors = "true"
-EOF
-export CONTAINERS_STORAGE_CONF="$STORAGE_CONF"
-PODMAN_SETUP
-        # --entrypoint "": run the given command directly, bypassing the
-        # image's own ENTRYPOINT (entrypoint.sh, which starts Marimo) --
-        # same idea as apptainer exec vs. run above.
-        printf 'exec podman run --rm --read-only --tmpfs /tmp --tmpfs /run --cgroup-manager=cgroupfs --events-backend=file --net=host --entrypoint %q -e %q -e %q -w /work' \
-            "" "HOME=/work/home" "TMPDIR=/work/tmp"
-        for a in "${BIND_ARGS[@]}" "${ENV_ARGS[@]}" "$image"; do printf ' %q' "$a"; done
-        printf ' "$@"\n'
-    } > "$runner"
-    chmod +x "$runner"
+    echo "ERROR: --enable-bsub is not supported on the Podman backend -- LSF's eauth" >&2
+    echo "       (Kerberos via sssd-kcm) fails inside a rootless Podman container." >&2
+    echo "       Verified working on Apptainer only; see README." >&2
+    exit 1
 }
