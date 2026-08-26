@@ -199,7 +199,7 @@ fi
 # Sandboxed bsub wrapper (off by default -- see container/bsub-wrapper/bin/
 # bsub, always on PATH inside the image but a no-op without this). Enabling
 # it bind-mounts the real LSF client (a single autofs leaf, like the RO_PATHS
-# check above) and forwards the LSF_*/EGO_*/LSB_* env vars bsub itself needs
+# check above) and forwards the LSF_*/EGO_* env vars bsub itself needs
 # to talk to the cluster -- none of which are forwarded otherwise.
 # ---------------------------------------------------------------------------
 if [[ "$ENABLE_BSUB" == "1" ]]; then
@@ -247,18 +247,32 @@ while IFS='=' read -r _name _; do
         # already exists upstream.
         ANTHROPIC_*|OPENAI_*|GEMINI_*|GOOGLE_*|*_API_KEY|*_AUTH_TOKEN|FG_SERVICE_TOKEN|FG_SERVICE_PORT|FG_HOSTNAME|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|http_proxy|https_proxy|no_proxy)
             ENV_PAIRS+=("$_name=${!_name}") ;;
-        # LSF/EGO's own client env vars -- only forwarded when the bsub
-        # wrapper block above actually bind-mounted /misc/lsf; otherwise
-        # these would just point at paths that don't exist in the
-        # container. LD_LIBRARY_PATH is included here since real bsub
-        # needs LSF_LIBDIR on it to run at all.
-        LSF_*|EGO_*|LSB_*|LD_LIBRARY_PATH)
+        # LSF/EGO's own CLIENT config vars (where its binaries/libs/conf
+        # live) -- only forwarded when the bsub wrapper block above
+        # actually bind-mounted /misc/lsf. Deliberately LSF_*/EGO_* only,
+        # NOT LSB_*: the LSB_* vars are the CURRENT job's own runtime
+        # context (this shell may itself be inside a job), not something a
+        # freshly-submitted job should inherit, and several of them (e.g.
+        # LSB_SUB_RES_REQ="rusage[mem=15360,]") contain commas/brackets
+        # that break Apptainer's --env flag (it parses its argument as a
+        # key=value CSV map, not a literal string). LD_LIBRARY_PATH is
+        # included since real bsub needs LSF_LIBDIR on it to run at all.
+        LSF_*|EGO_*|LD_LIBRARY_PATH)
             [[ "$ENABLE_BSUB" == "1" ]] && ENV_PAIRS+=("$_name=${!_name}") ;;
     esac
 done < <(env)
 unset _name
 
-[[ "$ENABLE_BSUB" == "1" ]] && ENV_PAIRS+=("BSUB_WRAPPER_ENABLED=1")
+if [[ "$ENABLE_BSUB" == "1" ]]; then
+    ENV_PAIRS+=("BSUB_WRAPPER_ENABLED=1")
+    # $WORK here is the REAL HOST path (e.g. /groups/lab/...), not the
+    # in-container "/work" it's bound to. The wrapper checks the runner
+    # script exists via the in-container path (its own default,
+    # /work/...) but must hand bsub the HOST path instead: a submitted
+    # job starts out running bare-metal on the exec host's filesystem,
+    # before any container exists there, so "/work/..." wouldn't resolve.
+    ENV_PAIRS+=("BSUB_WRAPPER_RUNNER_HOST=$WORK/.bsub-wrapper-runner.sh")
+fi
 
 # ---------------------------------------------------------------------------
 # write_bsub_runner_apptainer/_podman -- generate $WORK/.bsub-wrapper-runner.sh,
