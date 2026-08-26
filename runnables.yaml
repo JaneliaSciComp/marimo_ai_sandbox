@@ -7,6 +7,28 @@ requirements:
   - apptainer
   - pixi
 runnables:
+  - id: hello-world
+    name: "Diagnostic: Hello World (pixi)"
+    type: job
+    working_dir: repo
+    description: >-
+      Minimal diagnostic runnable with no Apptainer, no pixi feature
+      environments, and no Marimo -- just `pixi run` executing a trivial
+      shell command in the project's default environment. Used to isolate
+      whether job stalls seen on other runnables are caused by this repo's
+      container/pixi-env logic, or are more fundamental to how jobs execute
+      in this Fileglancer/LSF setup. Prints timestamps before and after so
+      elapsed wall-clock time is visible even if the environment is slow.
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" bash -c '
+      echo "=== before pixi run: $(date) on $(hostname) ===";
+      pixi run bash -c "echo hello world; date; hostname; whoami; pwd";
+      echo "=== after pixi run: $(date) ===" '
+    resources:
+      cpus: 1
+      memory: "1 GB"
+      walltime: "00:10"
+
   - id: marimo
     name: Start Marimo Server
     type: service
