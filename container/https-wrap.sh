@@ -247,6 +247,14 @@ CADDY_PID=$!
 if [[ -n "${SERVICE_URL_PATH:-}" ]]; then
     (
         for _ in $(seq 1 1800); do
+            if ! kill -0 "$MARIMO_PID" 2>/dev/null; then
+                echo "https-wrap: Marimo process died before HTTPS port opened; service URL not published." >&2
+                exit 1
+            fi
+            if ! kill -0 "$CADDY_PID" 2>/dev/null; then
+                echo "https-wrap: Caddy process died before HTTPS port opened; service URL not published." >&2
+                exit 1
+            fi
             if (exec 3<>"/dev/tcp/127.0.0.1/$HTTPS_PORT") 2>/dev/null; then
                 printf 'https://%s:%s/?access_token=%s' "${FG_HOSTNAME:-$HOST_NAME}" "$HTTPS_PORT" "$TOKEN" > "$SERVICE_URL_PATH"
                 echo ">> Published service URL to $SERVICE_URL_PATH"
@@ -257,6 +265,9 @@ if [[ -n "${SERVICE_URL_PATH:-}" ]]; then
         echo "https-wrap: port $HTTPS_PORT never opened; service URL not published." >&2
     ) &
     PUBLISHER_PID=$!
+else
+    echo ">> WARNING: \$SERVICE_URL_PATH is not set -- the service URL cannot be published to Fileglancer, so no launch link will ever appear for this job." >&2
 fi
 
 wait "$CADDY_PID"
+wait "${PUBLISHER_PID:-}" 2>/dev/null || true
