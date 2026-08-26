@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+#
+# bsub -- sandboxed bsub wrapper.
+#
+# Baked into every image build and always first on PATH (see Containerfile/
+# marimo.def), but a no-op unless the LAUNCHING host script was started with
+# --enable-bsub/ENABLE_BSUB=1 (see common.sh) -- which is the ONLY thing that
+# bind-mounts the real LSF client (/misc/lsf) and forwards the LSF_*/EGO_*
+# env vars this wrapper (and the real bsub underneath it) needs. With the
+# flag off, real bsub is not even reachable inside the container, so this
+# always exits with an error instead of silently doing nothing.
+#
+# Why this exists: LSF has no notion of "run my job inside a container" --
+# `bsub -n 4 python train.py` runs train.py bare-metal on whatever node LSF
+# picks. This wrapper lets a job submitted from INSIDE this sandbox
+# transparently re-enter the SAME sandbox image on that other node, instead
+# of escaping the sandbox the moment it's scheduled elsewhere.
+#
+# Convention (NOT real bsub's grammar -- real bsub has no such marker):
+#   bsub <lsf-options...> -- <command> [args...]
+# Everything before a literal "--" is passed straight through to the real
+# bsub as LSF options; everything after is the job's command, which gets
+# wrapped to re-enter this sandbox via BSUB_WRAPPER_RUNNER (a small script
+# common.sh's caller -- marimo.sh/shell.sh -- generates under $WORK, using
+# the exact same bind/env/GPU flags this container itself was launched
+# with, so the re-entered job sees the same view of the world).
+#
+# No "--" found (e.g. `bsub -Is /bin/bash`, or a script piped on stdin):
+# passed straight through, UNWRAPPED -- runs bare-metal on the target node,
+# exactly as it would with no wrapper present at all, rather than guessing
+# where the job's command starts in LSF's own, much richer option grammar.
+set -euo pipefail
+
+if [[ "${BSUB_WRAPPER_ENABLED:-0}" != "1" ]]; then
+    echo "bsub: the sandboxed bsub wrapper is disabled for this container." >&2
+    echo "      Re-launch with --enable-bsub (or ENABLE_BSUB=1) to use it." >&2
+    exit 127
+fi
+
+REAL_BSUB="${BSUB_WRAPPER_REAL_BSUB:-/misc/lsf/10.1/linux3.10-glibc2.17-x86_64/bin/bsub}"
+if [[ ! -x "$REAL_BSUB" ]]; then
+    echo "bsub: real bsub not found at '$REAL_BSUB' -- was /misc/lsf bind-mounted?" >&2
+    exit 127
+fi
+
+# Real bsub's own esub validation shells out to other LSF binaries (e.g.
+# `bugroup`) assuming they're already on PATH -- true on the host via
+# profile.lsf, not true in this container just because /misc/lsf is
+# bind-mounted. Fixed here (rather than via --env/-e PATH=... at launch)
+# since Apptainer shell-evaluates env values (so "$PATH" there would
+# resolve against the container's env) but Podman's -e does NOT -- setting
+# PATH here works identically on both backends instead of relying on
+# runtime-specific evaluation behavior.
+export PATH="$(dirname "$REAL_BSUB"):$PATH"
+
+opts=()
+cmd=()
+seen_sep=0
+for a in "$@"; do
+    if [[ $seen_sep -eq 0 && "$a" == "--" ]]; then
+        seen_sep=1
+        continue
+    fi
+    if [[ $seen_sep -eq 0 ]]; then
+        opts+=("$a")
+    else
+        cmd+=("$a")
+    fi
+done
+
+if [[ $seen_sep -eq 0 || ${#cmd[@]} -eq 0 ]]; then
+    exec "$REAL_BSUB" "$@"
+fi
+
+# Two distinct paths to the SAME file, needed for two different contexts:
+# RUNNER is how WE see it right now, from inside this container, where
+# only /work (not the host path it's bound from) resolves -- used just to
+# check it actually exists. RUNNER_HOST is what real bsub's job record
+# gets: the job starts out running bare-metal on whatever node LSF picks,
+# BEFORE any container exists there, so "/work/..." wouldn't resolve --
+# only the real, cluster-wide-NFS-visible host path does.
+RUNNER="${BSUB_WRAPPER_RUNNER:-/work/.bsub-wrapper-runner.sh}"
+if [[ ! -x "$RUNNER" ]]; then
+    echo "bsub: runner script '$RUNNER' not found -- was it generated at launch?" >&2
+    exit 127
+fi
+RUNNER_HOST="${BSUB_WRAPPER_RUNNER_HOST:-$RUNNER}"
+
+exec "$REAL_BSUB" "${opts[@]}" "$RUNNER_HOST" "${cmd[@]}"

@@ -8,6 +8,8 @@
 #   CLAUDE_CONFIG, GEMINI_CONFIG, CODEX_CONFIG -- each "rw", "ro", or unset
 #   (default: unset, i.e. not mounted at all -- see the BIND_PAIRS section
 #   below for why)
+#   ENABLE_BSUB -- "1" to enable the sandboxed bsub wrapper (see
+#   container/bsub-wrapper/bin/bsub); default unset/off.
 #
 # Also accepts on the caller's "$@" (highest precedence, overrides the env
 # var and conf/config.toml; consumed here, remaining args are left in "$@"
@@ -15,9 +17,10 @@
 #   --ro-paths PATHS   or   --ro-paths=PATHS   (space-separated, same format as RO_PATHS)
 #   --work PATH        or   --work=PATH
 #   --port PORT        or   --port=PORT
+#   --enable-bsub                              (no value; same as ENABLE_BSUB=1)
 #
 # Sets:
-#   WORK, PORT, RO_PATHS
+#   WORK, PORT, RO_PATHS, ENABLE_BSUB
 #   BIND_PAIRS  -- "src:dst[:options]" strings; callers prefix with -v or --bind
 #   ENV_PAIRS   -- "NAME=VALUE" strings;        callers prefix with -e or --env
 #
@@ -56,6 +59,10 @@ while [[ $# -gt 0 ]]; do
         --port=*)
             _val="${1#--port=}"
             [[ -n "$_val" ]] && PORT="$_val"
+            shift
+            ;;
+        --enable-bsub)
+            ENABLE_BSUB=1
             shift
             ;;
         *)
@@ -106,6 +113,7 @@ PORT="${PORT:-8080}"
 unset _PROJECT_ROOT
 
 RO_PATHS="${RO_PATHS:-}"
+ENABLE_BSUB="${ENABLE_BSUB:-0}"
 
 # Prepare the writable work dir.
 mkdir -p "$WORK"/home "$WORK"/tmp
@@ -188,6 +196,34 @@ if command -v nvidia-smi &>/dev/null && nvidia-smi -L &>/dev/null; then
 fi
 
 # ---------------------------------------------------------------------------
+# Sandboxed bsub wrapper (off by default -- see container/bsub-wrapper/bin/
+# bsub, always on PATH inside the image but a no-op without this). Enabling
+# it bind-mounts the real LSF client (a single autofs leaf, like the RO_PATHS
+# check above) and forwards the LSF_*/EGO_* env vars bsub itself needs
+# to talk to the cluster -- none of which are forwarded otherwise.
+# ---------------------------------------------------------------------------
+if [[ "$ENABLE_BSUB" == "1" ]]; then
+    LSF_BINDIR="${LSF_BINDIR:-}"
+    if [[ -z "$LSF_BINDIR" || ! -d "/misc/lsf" ]]; then
+        echo "ERROR: --enable-bsub requires LSF's own environment (LSF_BINDIR unset, or" >&2
+        echo "       /misc/lsf missing) -- run this from a shell with LSF already loaded." >&2
+        exit 1
+    fi
+    # $WORK must be visible from whatever OTHER node LSF schedules a
+    # wrapped job onto -- /scratch is node-local (see the RO_PATHS autofs
+    # comment above for the general caveat), so the child job's re-entry
+    # script (written into $WORK below by the caller) would be invisible
+    # there. /groups and /nrs are the real, cluster-wide NFS mounts.
+    case "$WORK" in
+        /scratch/*)
+            echo "ERROR: --enable-bsub needs \$WORK on shared storage (/groups or /nrs)," >&2
+            echo "       not /scratch, which is local to this node only: $WORK" >&2
+            exit 1 ;;
+    esac
+    BIND_PAIRS+=("/misc/lsf:/misc/lsf:ro")
+fi
+
+# ---------------------------------------------------------------------------
 # ENV_PAIRS -- one "NAME=VALUE" entry per forwarded variable.
 # Callers convert with:  -e "$pair"       (podman)
 #                        --env "$pair"    (apptainer)
@@ -211,6 +247,72 @@ while IFS='=' read -r _name _; do
         # already exists upstream.
         ANTHROPIC_*|OPENAI_*|GEMINI_*|GOOGLE_*|*_API_KEY|*_AUTH_TOKEN|FG_SERVICE_TOKEN|FG_SERVICE_PORT|FG_HOSTNAME|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|http_proxy|https_proxy|no_proxy)
             ENV_PAIRS+=("$_name=${!_name}") ;;
+        # LSF/EGO's own CLIENT config vars (where its binaries/libs/conf
+        # live) -- only forwarded when the bsub wrapper block above
+        # actually bind-mounted /misc/lsf. Deliberately LSF_*/EGO_* only,
+        # NOT LSB_*: the LSB_* vars are the CURRENT job's own runtime
+        # context (this shell may itself be inside a job), not something a
+        # freshly-submitted job should inherit, and several of them (e.g.
+        # LSB_SUB_RES_REQ="rusage[mem=15360,]") contain commas/brackets
+        # that break Apptainer's --env flag (it parses its argument as a
+        # key=value CSV map, not a literal string). LD_LIBRARY_PATH is
+        # included since real bsub needs LSF_LIBDIR on it to run at all.
+        LSF_*|EGO_*|LD_LIBRARY_PATH)
+            [[ "$ENABLE_BSUB" == "1" ]] && ENV_PAIRS+=("$_name=${!_name}") ;;
     esac
 done < <(env)
 unset _name
+
+if [[ "$ENABLE_BSUB" == "1" ]]; then
+    ENV_PAIRS+=("BSUB_WRAPPER_ENABLED=1")
+    # $WORK here is the REAL HOST path (e.g. /groups/lab/...), not the
+    # in-container "/work" it's bound to. The wrapper checks the runner
+    # script exists via the in-container path (its own default,
+    # /work/...) but must hand bsub the HOST path instead: a submitted
+    # job starts out running bare-metal on the exec host's filesystem,
+    # before any container exists there, so "/work/..." wouldn't resolve.
+    ENV_PAIRS+=("BSUB_WRAPPER_RUNNER_HOST=$WORK/.bsub-wrapper-runner.sh")
+fi
+
+# ---------------------------------------------------------------------------
+# write_bsub_runner_apptainer/_podman -- generate $WORK/.bsub-wrapper-runner.sh,
+# the script container/bsub-wrapper/bin/bsub execs a wrapped job's command
+# through. Called by each backend's marimo.sh/shell.sh (after they've built
+# their own BIND_ARGS/ENV_ARGS) when $ENABLE_BSUB == 1, so the re-entered
+# job on whatever node LSF picks gets the exact same binds/env this
+# container itself was launched with. Not called at all when bsub isn't
+# enabled, so the file is simply never written.
+# ---------------------------------------------------------------------------
+write_bsub_runner_apptainer() {
+    local sif="$1" runner="$WORK/.bsub-wrapper-runner.sh" sif_abs a
+    # readlink -f: $sif is relative to the caller's own dir; the runner
+    # needs an absolute path since it may run with a different CWD, on a
+    # different node, via the real bsub.
+    sif_abs="$(readlink -f "$sif")"
+    {
+        echo "#!/usr/bin/env bash"
+        printf 'exec apptainer exec --contain --cleanenv --pid --home %q --env %q' \
+            "$WORK/home:/work/home" "TMPDIR=/work/tmp"
+        for a in "${BIND_ARGS[@]}" "${ENV_ARGS[@]}" "$sif_abs"; do printf ' %q' "$a"; done
+        printf ' "$@"\n'
+    } > "$runner"
+    chmod +x "$runner"
+}
+
+# KNOWN ISSUE (see README's "Submitting LSF jobs" section): LSF's eauth
+# fails inside a rootless Podman container ("External authentication
+# failed") -- confirmed independent of UID mapping, capabilities, and the
+# SSSD/KCM sockets tried so far. Hard-error here (consistent with the
+# other --enable-bsub misconfiguration checks above: missing /misc/lsf,
+# $WORK under /scratch) rather than let every `bsub` call inside the
+# container hit this cryptic error at submission time. A working
+# runner-generator implementation (mirroring write_bsub_runner_apptainer,
+# plus the Janelia podman storage-redirect setup a standalone job needs)
+# existed at this commit's parent in git history, if eauth is ever
+# root-caused and this needs re-enabling.
+write_bsub_runner_podman() {
+    echo "ERROR: --enable-bsub is not supported on the Podman backend -- LSF's eauth" >&2
+    echo "       (Kerberos via sssd-kcm) fails inside a rootless Podman container." >&2
+    echo "       Verified working on Apptainer only; see README." >&2
+    exit 1
+}

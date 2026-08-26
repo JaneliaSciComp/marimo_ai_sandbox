@@ -28,6 +28,7 @@ Containerfile                 Podman/Docker build recipe
 build.sh / build_podman.sh    build scripts (for Apptainer or Podman image)
 start.sh / run_podman.sh        serve Marimo with the read-only sandbox model
 shell.sh / shell_podman.sh    interactive shell in the sandbox (drive the agent CLIs)
+bsub-wrapper/bin/bsub         opt-in bsub wrapper -- see "Submitting LSF jobs" below
 app/agents_demo.py            starter Marimo notebook that calls an agent via subprocess
 work/                         runtime writable dir (created on first run; git-ignored)
 ```
@@ -191,6 +192,12 @@ isn't:
   them from there — a `noexec` mount would break marimo itself. Properly
   separating an exec-allowed subtree (the pixi env) from a `noexec` one
   (notebooks/data) would be a real architecture change, not a flag.
+- **`bsub` (LSF job submission) is off by default.** A container launched
+  without `--enable-bsub`/`ENABLE_BSUB=1` has no LSF client at all inside
+  it — an agent calling `bsub` gets a clear error, not a silent failure.
+  Turning this on hands the sandbox the ability to submit new cluster jobs
+  under your own identity, on top of the one it's already running in — see
+  [Submitting LSF jobs from inside the sandbox](#submitting-lsf-jobs-from-inside-the-sandbox-bsub-wrapper).
 
 ## Python / Marimo environment
 
@@ -242,6 +249,58 @@ codex exec "..."
 gemini -p "..."
 agy -p "..."
 ```
+
+## Submitting LSF jobs from inside the sandbox (bsub wrapper)
+
+LSF has no notion of "run my job inside a container" — a bare `bsub -n 4
+python train.py` runs `train.py` directly on whatever node LSF picks, outside
+the sandbox entirely. This repo ships an **opt-in** `bsub` wrapper
+(`container/bsub-wrapper/bin/bsub`, always on `PATH` inside the image) that
+lets a wrapped job re-enter the *same* sandbox image on that other node
+instead.
+
+**Off by default.** Without `--enable-bsub` (or `ENABLE_BSUB=1`), the real
+LSF client isn't even bind-mounted in, so calling `bsub` inside the container
+fails immediately with an explanatory error — enabling this is a deliberate
+expansion of what the sandbox can do (it can now submit new cluster jobs
+under your identity, on top of the one it's already running in), not
+something that happens implicitly.
+
+```bash
+./start.sh --enable-bsub --ro-paths "/groups/scicompsoft /nrs/scicompsoft"
+```
+
+**Apptainer only, for now.** Verified end-to-end: a wrapped job submitted
+from inside a live Apptainer sandbox landed on a different real node and
+correctly re-entered the same sandbox image there. The Podman backend hits
+a real, unresolved blocker: LSF's `eauth` (external authentication) uses
+Kerberos via `sssd-kcm`, and fails inside a rootless Podman container
+(`Failed in an LSF library call: External authentication failed`) even
+after fixing UID mapping (`--userns=keep-id`), bind-mounting the SSSD/KCM
+sockets, and granting all capabilities/unconfined seccomp — this is a
+deeper incompatibility between rootless Podman's isolation and this
+cluster's Kerberos-based LSF auth, not a bug in the wrapper itself.
+`--enable-bsub` therefore **refuses to start on the Podman backend** (a
+hard error, not just a warning) until this is root-caused -- likely needs
+Janelia IT input on what `eauth`/Kerberos actually requires inside a
+container's network/mount namespace.
+
+`$WORK` must be on shared storage (`/groups` or `/nrs`, not `/scratch`, which
+is local to a single node) — the wrapper writes a small re-entry script
+there that the job needs to see from whatever node it lands on.
+
+Inside the container, wrap a job's command with a literal `--`:
+
+```bash
+bsub -n 4 -W 1:00 -o out.log -- python train.py --epochs 5
+```
+
+Everything before `--` is passed straight through to the real `bsub` as LSF
+options; everything after becomes the job's command, re-entered inside this
+same sandbox image (same binds, same env) wherever LSF schedules it. A
+`bsub` call with **no** `--` (e.g. `bsub -Is /bin/bash`, or a script piped on
+stdin) is passed through completely unwrapped — it runs bare-metal on the
+target node, exactly as it would with no wrapper present.
 
 ## Credentials
 
