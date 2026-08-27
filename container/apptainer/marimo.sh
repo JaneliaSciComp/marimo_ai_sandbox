@@ -67,6 +67,10 @@
 #   ./start.sh --extra-marimo-flag                 # unrecognized args go to marimo
 set -euo pipefail
 
+# Captured before the cd below so common.sh can resolve a relative --work
+# path against where the user actually ran this from, not this script's dir.
+_CALLER_PWD="$PWD"
+
 cd "$(dirname "$0")"
 
 SIF="${SIF:-marimo_sandbox.sif}"

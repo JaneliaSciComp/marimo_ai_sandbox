@@ -33,6 +33,10 @@
 #   IMAGE=marimo_sandbox:latest ./run_podman.sh       # skip the registry, build locally
 set -euo pipefail
 
+# Captured before the cd below so common.sh can resolve a relative --work
+# path against where the user actually ran this from, not this script's dir.
+_CALLER_PWD="$PWD"
+
 cd "$(dirname "$0")"
 
 IMAGE="${IMAGE:-ghcr.io/janeliascicomp/marimo_ai_sandbox:latest}"
