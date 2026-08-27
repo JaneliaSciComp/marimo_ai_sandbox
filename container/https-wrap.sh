@@ -159,15 +159,25 @@ else
 fi
 
 # Launch the existing marimo-apptainer/marimo-podman task bound to the
-# internal port, in the background. `-- --host 127.0.0.1` (marimo's own
-# flag, passed through unmodified by marimo.sh/marimo.def/Containerfile)
-# keeps it off 0.0.0.0 so it's only reachable through the Caddy proxy, not
-# directly. `--token-password "$TOKEN"` makes the token the one resolved
-# above, rather than a hidden random one only discoverable by scraping
-# stdout.
+# internal port, in the background. `--host 127.0.0.1` (marimo's own flag,
+# passed through unmodified by marimo.sh/marimo.def/Containerfile) keeps it
+# off 0.0.0.0 so it's only reachable through the Caddy proxy, not directly.
+# `--token-password "$TOKEN"` makes the token the one resolved above, rather
+# than a hidden random one only discoverable by scraping stdout.
+#
+# No `--` separator here (unlike [tasks.marimo]/[tasks.shell] in pixi.toml,
+# which need one to mark the end of their own templated positional args):
+# marimo-apptainer/marimo-podman are bare-command tasks with no declared
+# args, so a literal "--" isn't consumed by pixi, common.sh, marimo.sh, or
+# entrypoint.sh -- it rides straight through into marimo's own Click-based
+# CLI, which treats "--" as "stop parsing options, everything after this is
+# positional." That silently swallowed --host/--token-password as ignored
+# positional args, so marimo fell back to generating its own random token
+# instead of honoring $TOKEN -- confirmed: the token this published in
+# SERVICE_URL_PATH didn't match the token marimo actually enforced.
 echo ">> Starting Marimo via $MARIMO_TASK (building its image first, if needed -- this can take several minutes on a fresh job) ..."
 _set_phase pulling_image
-pixi run "$MARIMO_TASK" --port "$INTERNAL_PORT" "$@" -- --host 127.0.0.1 --token-password "$TOKEN" &
+pixi run "$MARIMO_TASK" --port "$INTERNAL_PORT" "$@" --host 127.0.0.1 --token-password "$TOKEN" &
 MARIMO_PID=$!
 
 cleanup() {
@@ -247,6 +257,14 @@ CADDY_PID=$!
 if [[ -n "${SERVICE_URL_PATH:-}" ]]; then
     (
         for _ in $(seq 1 1800); do
+            if ! kill -0 "$MARIMO_PID" 2>/dev/null; then
+                echo "https-wrap: Marimo process died before HTTPS port opened; service URL not published." >&2
+                exit 1
+            fi
+            if ! kill -0 "$CADDY_PID" 2>/dev/null; then
+                echo "https-wrap: Caddy process died before HTTPS port opened; service URL not published." >&2
+                exit 1
+            fi
             if (exec 3<>"/dev/tcp/127.0.0.1/$HTTPS_PORT") 2>/dev/null; then
                 printf 'https://%s:%s/?access_token=%s' "${FG_HOSTNAME:-$HOST_NAME}" "$HTTPS_PORT" "$TOKEN" > "$SERVICE_URL_PATH"
                 echo ">> Published service URL to $SERVICE_URL_PATH"
@@ -257,6 +275,9 @@ if [[ -n "${SERVICE_URL_PATH:-}" ]]; then
         echo "https-wrap: port $HTTPS_PORT never opened; service URL not published." >&2
     ) &
     PUBLISHER_PID=$!
+else
+    echo ">> WARNING: \$SERVICE_URL_PATH is not set -- the service URL cannot be published to Fileglancer, so no launch link will ever appear for this job." >&2
 fi
 
 wait "$CADDY_PID"
+wait "${PUBLISHER_PID:-}" 2>/dev/null || true
