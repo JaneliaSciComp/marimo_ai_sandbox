@@ -87,11 +87,17 @@ async def handle_client(reader, writer, allowlist):
             # Plain HTTP: read headers, find Host:, forward raw bytes.
             headers = first_line
             host = None
+            port = 80
             while True:
                 line = await reader.readline()
                 headers += line
                 if line.lower().startswith(b"host:"):
-                    host = line.split(b":", 1)[1].strip().decode("latin1").split(":")[0]
+                    hostport = line.split(b":", 1)[1].strip().decode("latin1")
+                    host, _, portstr = hostport.partition(":")
+                    # Host: example.com:8080 -- honor the explicit port
+                    # instead of always connecting to 80, which broke
+                    # allowlisted HTTP traffic to any non-80 port.
+                    port = int(portstr) if portstr else 80
                 if line in (b"\r\n", b""):
                     break
             if not host or not host_allowed(host, allowlist):
@@ -100,9 +106,9 @@ async def handle_client(reader, writer, allowlist):
                 await writer.drain()
                 writer.close()
                 return
-            print(f"[allowlist_proxy] ALLOW HTTP {host} (peer={peer})", file=sys.stderr)
+            print(f"[allowlist_proxy] ALLOW HTTP {host}:{port} (peer={peer})", file=sys.stderr)
             try:
-                remote_reader, remote_writer = await asyncio.open_connection(host, 80)
+                remote_reader, remote_writer = await asyncio.open_connection(host, port)
             except OSError:
                 writer.write(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
                 await writer.drain()

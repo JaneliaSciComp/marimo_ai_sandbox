@@ -105,7 +105,7 @@ podman_network_setup "$PWD"
 echo ">> Serving Marimo on http://0.0.0.0:${PORT}  (work dir: $WORK)"
 echo ">> Read-only host binds:${RO_PATHS:- (none)}"
 [[ "$HAS_GPU" == "1" ]] && echo ">> GPU detected -- passing --device nvidia.com/gpu=all"
-[[ -n "${ALLOW_HOSTS// /}" ]] && echo ">> Egress allowlist active: $ALLOW_HOSTS (--network=none otherwise)"
+[[ -n "${ALLOW_HOSTS// /}" ]] && echo ">> Egress allowlist active: $ALLOW_HOSTS (--network=none otherwise); proxy log: $PODMAN_PROXY_DIR/proxy.log"
 _set_phase starting
 
 PODMAN_RUN_ARGS=(

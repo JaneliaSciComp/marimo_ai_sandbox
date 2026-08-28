@@ -193,6 +193,9 @@ podman_run_watched() {
 #                             plus the relay/proxy-socket volume mounts
 #   PODMAN_PROXY_PID       -- host-side allowlist_proxy.py PID, or "" if unused
 #   PODMAN_PROXY_SOCK      -- its Unix socket path, or "" if unused
+#   PODMAN_PROXY_DIR       -- the private temp dir PODMAN_PROXY_SOCK lives in
+#                             (removed wholesale by podman_network_cleanup),
+#                             or "" if unused
 #   PODMAN_INNER_ENTRYPOINT -- "/bin/bash" if the allowlist is active (the
 #                             caller must add `--entrypoint
 #                             "$PODMAN_INNER_ENTRYPOINT"` when non-empty),
@@ -206,6 +209,7 @@ podman_network_setup() {
     local script_dir="$1"
     PODMAN_PROXY_PID=""
     PODMAN_PROXY_SOCK=""
+    PODMAN_PROXY_DIR=""
     PODMAN_INNER_ENTRYPOINT=""
     PODMAN_INNER_ARGS=()
 
@@ -214,13 +218,26 @@ podman_network_setup() {
         return 0
     fi
 
-    PODMAN_PROXY_SOCK="$(mktemp -u /tmp/podman-sandbox-proxy.XXXXXX.sock)"
+    # A private directory (mktemp -d), not `mktemp -u` on the socket path
+    # directly -- `-u` only prints a name it thinks is free, with no
+    # exclusive creation, so a concurrent process (or an attacker in a
+    # world-writable /tmp) can win the race and create that path first.
+    # `mktemp -d` atomically creates a directory only we can write to, and
+    # the socket lives inside it.
+    PODMAN_PROXY_DIR="$(mktemp -d /tmp/podman-sandbox-proxy.XXXXXX)"
+    PODMAN_PROXY_SOCK="$PODMAN_PROXY_DIR/proxy.sock"
     # shellcheck disable=SC2086 -- ALLOW_HOSTS is a space-separated list,
     # intentionally word-split into multiple allowlist_proxy.py arguments.
     python3 "$script_dir/allowlist_proxy.py" "$PODMAN_PROXY_SOCK" $ALLOW_HOSTS \
-        > "${PODMAN_PROXY_SOCK}.log" 2>&1 &
+        > "$PODMAN_PROXY_DIR/proxy.log" 2>&1 &
     PODMAN_PROXY_PID=$!
     sleep 1
+    if ! kill -0 "$PODMAN_PROXY_PID" 2>/dev/null; then
+        echo "ERROR: allowlist_proxy.py failed to start -- log:" >&2
+        cat "$PODMAN_PROXY_DIR/proxy.log" >&2
+        rm -rf "$PODMAN_PROXY_DIR"
+        exit 1
+    fi
 
     local relay_port=$((20000 + RANDOM % 20000))
     PODMAN_NETWORK_ARGS=(
@@ -240,9 +257,10 @@ podman_network_setup() {
 }
 
 # podman_network_cleanup -- stop the host-side allowlist proxy (if any) and
-# remove its socket. No-op when the allowlist was never enabled.
+# remove its private temp dir (socket + log). No-op when the allowlist was
+# never enabled.
 podman_network_cleanup() {
     [[ -n "${PODMAN_PROXY_PID:-}" ]] && kill "$PODMAN_PROXY_PID" 2>/dev/null
-    [[ -n "${PODMAN_PROXY_SOCK:-}" && -e "$PODMAN_PROXY_SOCK" ]] && rm -f "$PODMAN_PROXY_SOCK"
+    [[ -n "${PODMAN_PROXY_DIR:-}" && -e "$PODMAN_PROXY_DIR" ]] && rm -rf "$PODMAN_PROXY_DIR"
     return 0
 }

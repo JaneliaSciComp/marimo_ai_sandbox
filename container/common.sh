@@ -13,7 +13,8 @@
 #   ALLOW_HOSTS -- space-separated hostnames allowed through the Podman
 #   egress allowlist (container/podman/{marimo,shell}.sh only); default
 #   unset, i.e. no allowlist -- those scripts keep their existing
-#   unrestricted --net=host behavior. See podman_network_setup below.
+#   unrestricted --net=host behavior. See podman_network_setup in
+#   container/podman/lib.sh.
 #
 # Also accepts on the caller's "$@" (highest precedence, overrides the env
 # var and conf/config.toml; consumed here, remaining args are left in "$@"
@@ -71,7 +72,11 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --allow)
-            [[ -n "${2:-}" ]] && ALLOW_HOSTS="${ALLOW_HOSTS:-}${ALLOW_HOSTS:+ }$2"
+            if [[ -z "${2:-}" ]]; then
+                echo "ERROR: --allow requires a hostname argument" >&2
+                exit 1
+            fi
+            ALLOW_HOSTS="${ALLOW_HOSTS:-}${ALLOW_HOSTS:+ }$2"
             shift 2
             ;;
         --allow=*)

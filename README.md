@@ -260,7 +260,8 @@ isn't:
   allowlist proxy (`container/podman/allowlist_proxy.py`, reached via an
   in-container relay, `container/podman/relay.py`) permits only the listed
   hostnames — everything else gets an HTTP 403, logged to
-  `<socket-path>.log`. Adapted from
+  `proxy.log` inside the proxy's own private temp dir (printed at startup).
+  Adapted from
   [JaneliaScientificComputingSystems/agentic-sandbox](https://github.com/JaneliaScientificComputingSystems/agentic-sandbox),
   which uses the identical mechanism for its bwrap sandbox. Not available
   for the Apptainer backend.
