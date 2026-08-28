@@ -151,6 +151,68 @@ runnables:
       memory: "8 GB"
       walltime: "08:00"
 
+  - id: marimo-podman-https
+    name: Start Marimo Server (Podman, HTTPS)
+    type: service
+    working_dir: repo
+    description: >-
+      Serves the Marimo notebook server behind a local Caddy TLS-terminating
+      reverse proxy, forced onto the Podman backend via BACKEND=podman --
+      Podman is the backend **preferred by Janelia HPC admins** (see
+      README.md's "GPU passthrough" and "Podman storage isolation"
+      sections). Without this override, the "marimo-https" runnable above
+      always prefers Apptainer when it's present on the host; use this
+      runnable instead when you specifically want Podman+HTTPS. On first
+      run, the wrapper script (container/https-wrap.sh) generates a
+      persistent self-signed cert with openssl and prints its path --
+      install it in your browser's trust store to avoid the
+      untrusted-certificate warning. Because this is a manual (non-auto_url)
+      service, Fileglancer injects SERVICE_URL_PATH, FG_PHASE_PATH,
+      FG_HOSTNAME, and FG_WORK_DIR automatically for every service-type job;
+      no env: block is needed to request them. The wrapper script uses these
+      to publish the service URL itself once Caddy's HTTPS port is open.
+      Pulls the pre-built image from ghcr.io/janeliascicomp/marimo_ai_sandbox
+      rather than building from source (see the "marimo" runnable above).
+    pre_run: >-
+      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" BACKEND=podman pixi run --environment https
+      container/https-wrap.sh --port "$FG_SERVICE_PORT"
+    parameters:
+      - flag: --ro-paths
+        name: Read-only paths
+        type: string
+        description: >-
+          Space-separated host paths bound read-only into the sandbox. Must
+          be leaf paths (e.g. /groups/scicompsoft), not bare autofs parents
+          (/groups, /nrs, /scratch). Defaults to conf/config.toml.
+      - flag: --work
+        name: Work directory
+        type: directory
+        exists: false
+        description: >-
+          Writable host directory bound to /work inside the sandbox. Defaults
+          to ./work.
+      - flag: --https-port
+        name: HTTPS port
+        type: integer
+        required: false
+        description: >-
+          Public TLS port Caddy listens on. Defaults to an arbitrary free
+          port chosen automatically at start.
+      - flag: --allow
+        name: Allowed egress hosts
+        type: string
+        required: false
+        description: >-
+          Space-separated hostnames to allow through the Podman-only network
+          egress allowlist (see README.md's "Sandbox strength" section).
+          Leave unset for the default, unrestricted egress.
+    resources:
+      cpus: 8
+      memory: "8 GB"
+      walltime: "08:00"
+
   - id: marimo-native
     name: Start Marimo Server (native container, experimental)
     type: service

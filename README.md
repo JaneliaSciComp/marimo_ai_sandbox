@@ -33,7 +33,8 @@ container/podman/allowlist_proxy.py / relay.py   the allowlist mechanism itself 
 container/bsub-wrapper/bin/bsub       opt-in bsub wrapper -- see "Submitting LSF jobs" below
 container/app/AGENTS.md               seeded into /work; CLAUDE.md/GEMINI.md symlink to it
 container/app/agents_demo.py          starter Marimo notebook that calls an agent via subprocess
-runnables.yaml                        Fileglancer job manifest (marimo, marimo-https, marimo-native)
+runnables.yaml                        Fileglancer job manifest (marimo, marimo-podman, marimo-https,
+                                       marimo-podman-https, marimo-native)
 work/                                 runtime writable dir (created on first run; git-ignored)
 ```
 
@@ -97,7 +98,17 @@ proxy:
 
 ```bash
 pixi run marimo-https                 # serves https://<host>:8443 -> internal :8080
+BACKEND=podman pixi run marimo-https  # force Podman, even if Apptainer is also on PATH
 ```
+
+`container/https-wrap.sh` picks the same backend `pixi run marimo` would by
+default (Apptainer if it's on `PATH`, else Podman) -- set `BACKEND=podman`
+(or `BACKEND=apptainer`) to override that, e.g. to get Podman+HTTPS on a
+host that also has Apptainer installed. `runnables.yaml`'s
+`marimo-podman-https` runnable uses this to force Podman, since it's the
+backend preferred by HPC admins (see "GPU passthrough" and "Podman storage
+isolation" above) but the plain `marimo-https` runnable would otherwise
+always prefer Apptainer when present.
 
 Caddy terminates TLS using a self-signed certificate that the wrapper script
 generates itself (via `openssl`) and hands to Caddy as a static cert file,

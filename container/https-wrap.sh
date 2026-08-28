@@ -33,6 +33,7 @@
 # Usage:
 #   pixi run marimo-https
 #   pixi run marimo-https --ro-paths "/groups/scicompsoft" --port 8080 --https-port 8443
+#   BACKEND=podman pixi run marimo-https   # force Podman even if Apptainer is on PATH
 #
 # Accepts (same style as container/common.sh):
 #   --ro-paths PATHS   forwarded to marimo-apptainer/marimo-podman
@@ -40,6 +41,10 @@
 #   --port PORT        internal Marimo port (default 8080)
 #   --https-port PORT  public TLS-terminating port Caddy listens on (default: an
 #                       arbitrary free port, auto-selected)
+#
+# BACKEND=apptainer|podman (env var, not a flag) -- forces that backend
+# regardless of what's on PATH; unset auto-detects (apptainer if present,
+# else podman). See runnables.yaml's marimo-podman-https for why this exists.
 set -euo pipefail
 
 # Under set -e a failing command just kills the script with no explanation,
@@ -146,17 +151,34 @@ else
     printf '%s' "$TOKEN" > "$WORK_VAL/.marimo-token"
 fi
 
-# Pick the same backend the plain-HTTP `pixi run marimo` task would (see
-# [tasks.marimo] in pixi.toml): apptainer if it's on PATH, else podman. This
-# is a plain PATH check, not the pixi "apptainer" feature/environment -- the
-# https feature deliberately doesn't pull that in (see pixi.toml), so this
-# stays podman-only on hosts without apptainer instead of quietly requiring
-# it via pixi.
-if command -v apptainer &>/dev/null; then
-    MARIMO_TASK=marimo-apptainer
-else
-    MARIMO_TASK=marimo-podman
-fi
+# Pick the backend to run Marimo through. Default (BACKEND unset): the same
+# auto-detection the plain-HTTP `pixi run marimo` task uses (see
+# [tasks.marimo] in pixi.toml) -- apptainer if it's on PATH, else podman.
+# This is a plain PATH check, not the pixi "apptainer" feature/environment
+# -- the https feature deliberately doesn't pull that in (see pixi.toml), so
+# this stays podman-only on hosts without apptainer instead of quietly
+# requiring it via pixi.
+#
+# Set BACKEND=podman (or =apptainer) to force a specific backend regardless
+# of what's on PATH -- e.g. the marimo-podman-https runnable in
+# runnables.yaml uses this to get Podman+HTTPS on a host that also has
+# Apptainer installed, since auto-detection alone always prefers Apptainer
+# when both are present.
+case "${BACKEND:-}" in
+    apptainer) MARIMO_TASK=marimo-apptainer ;;
+    podman)    MARIMO_TASK=marimo-podman ;;
+    "")
+        if command -v apptainer &>/dev/null; then
+            MARIMO_TASK=marimo-apptainer
+        else
+            MARIMO_TASK=marimo-podman
+        fi
+        ;;
+    *)
+        echo "ERROR: BACKEND must be 'apptainer' or 'podman' (got '$BACKEND')" >&2
+        exit 1
+        ;;
+esac
 
 # Launch the existing marimo-apptainer/marimo-podman task bound to the
 # internal port, in the background. `--host 127.0.0.1` (marimo's own flag,
