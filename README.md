@@ -309,7 +309,15 @@ isn't:
   checked. Adapted from
   [JaneliaScientificComputingSystems/agentic-sandbox](https://github.com/JaneliaScientificComputingSystems/agentic-sandbox),
   which uses the identical mechanism (and the identical trust boundary) for
-  its bwrap sandbox.
+  its bwrap sandbox. **Not compatible with the HTTPS runnables**
+  (`marimo-https`/`marimo-podman-https`): the allowlist isolates the
+  container's network namespace, including its own loopback, so Caddy --
+  which runs *outside* the container, on the host -- can no longer reach the
+  service it's supposed to front. Confirmed live: this used to fail silently
+  with a plain Caddy 502, no explanation; `https-wrap.sh` now hard-errors
+  immediately instead if `--allow`/`$ALLOW_HOSTS` is set. Use the plain-HTTP
+  `marimo-apptainer`/`marimo-podman` tasks (or `shell-apptainer`/
+  `shell-podman`) with `--allow` instead.
 - **Identity** — **not isolated**. The container runs as your real
   uid/gid with all your real HHMI/Janelia group memberships, not a scoped
   service account. This is inherent to how Fileglancer/LSF jobs execute
