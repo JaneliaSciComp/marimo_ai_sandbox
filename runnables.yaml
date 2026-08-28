@@ -7,118 +7,17 @@ requirements:
   - apptainer
   - pixi
 runnables:
-  - id: marimo
-    name: Start Marimo Server
-    type: service
-    auto_url: true
-    service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
-    working_dir: repo
-    description: >-
-      Serves the Marimo notebook server. The host filesystem is mounted
-      read-only except for the work directory, which holds notebooks and
-      agent config/cache. Pulls the pre-built image published by
-      .github/workflows/publish-image.yml (ghcr.io/janeliascicomp/marimo_ai_sandbox)
-      instead of building from source; falls back to a local build only if
-      the pull fails and no local image exists yet.
-    pre_run: >-
-      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
-    command: >-
-      PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-apptainer
-      --port "$FG_SERVICE_PORT" --token-password "$FG_SERVICE_TOKEN"
-    parameters:
-      - flag: --ro-paths
-        name: Read-only paths
-        type: string
-        description: >-
-          Space-separated host paths bound read-only into the sandbox. Must
-          be leaf paths (e.g. /groups/scicompsoft), not bare autofs parents
-          (/groups, /nrs, /scratch). Defaults to conf/config.toml.
-      - flag: --work
-        name: Work directory
-        type: directory
-        exists: false
-        description: >-
-          Writable host directory bound to /work inside the sandbox. Defaults
-          to ./work.
-    resources:
-      cpus: 8
-      memory: "8 GB"
-      walltime: "08:00"
-
-  - id: marimo-podman
-    name: Start Marimo Server (Podman)
-    type: service
-    auto_url: true
-    service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
-    working_dir: repo
-    description: >-
-      Serves the Marimo notebook server via Podman instead of Apptainer.
-      Podman is the backend **preferred by Janelia HPC admins** -- see
-      README.md's "GPU passthrough" and "Podman storage isolation" sections
-      for why (verified GPU passthrough via NVIDIA CDI, and per-job storage
-      isolation so concurrent Podman jobs from the same user can safely
-      share a GPU node). The host filesystem is mounted read-only except for
-      the work directory, which holds notebooks and agent config/cache.
-      Pulls the pre-built image published by
-      .github/workflows/publish-image.yml (ghcr.io/janeliascicomp/marimo_ai_sandbox)
-      instead of building from source; falls back to a local build only if
-      the pull fails and no local image exists yet.
-    pre_run: >-
-      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
-    command: >-
-      PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-podman
-      --port "$FG_SERVICE_PORT" --token-password "$FG_SERVICE_TOKEN"
-    parameters:
-      - flag: --ro-paths
-        name: Read-only paths
-        type: string
-        description: >-
-          Space-separated host paths bound read-only into the sandbox. Must
-          be leaf paths (e.g. /groups/scicompsoft), not bare autofs parents
-          (/groups, /nrs, /scratch). Defaults to conf/config.toml.
-      - flag: --work
-        name: Work directory
-        type: directory
-        exists: false
-        description: >-
-          Writable host directory bound to /work inside the sandbox. Defaults
-          to ./work.
-      - flag: --allow
-        name: Allowed egress hosts
-        type: string
-        required: false
-        description: >-
-          Space-separated hostnames to allow through the Podman-only network
-          egress allowlist (see README.md's "Sandbox strength" section).
-          Leave unset for the default, unrestricted egress.
-    resources:
-      cpus: 8
-      memory: "8 GB"
-      walltime: "08:00"
-
   - id: marimo-https
     name: Start Marimo Server (HTTPS)
     type: service
     working_dir: repo
     description: >-
-      Serves the Marimo notebook server behind a local Caddy TLS-terminating
-      reverse proxy. On first run, the wrapper script (container/https-wrap.sh)
-      generates a persistent self-signed cert with openssl and prints its path
-      -- install it in your browser's trust store to avoid the
-      untrusted-certificate warning. Because this is a manual (non-auto_url)
-      service, Fileglancer injects SERVICE_URL_PATH, FG_PHASE_PATH,
-      FG_HOSTNAME, and FG_WORK_DIR automatically for every service-type job;
-      no env: block is needed to request them. The wrapper script uses these
-      to publish the service URL itself once Caddy's HTTPS port is open
-      (rather than using Fileglancer's auto_url, which would point at
-      Marimo's own plain-HTTP port instead of Caddy's HTTPS one). If the
-      launch link never appears, check this job's Error Log first -- the
-      wrapper now logs explicitly if SERVICE_URL_PATH is unset, or if Marimo
-      or Caddy died before the HTTPS port opened. Runs Marimo itself via
-      apptainer if available on the host, otherwise falls back to Podman --
-      same fallback as the plain "marimo" pixi task. Both pull the pre-built
-      image from ghcr.io/janeliascicomp/marimo_ai_sandbox rather than
-      building from source (see the "marimo" runnable above).
+      Serves Marimo behind a local Caddy TLS-terminating reverse proxy.
+      Manual (non-auto_url) service: container/https-wrap.sh publishes the
+      launch URL itself once Caddy's HTTPS port is open, and prints a
+      self-signed cert path to trust on first run. Uses Apptainer if
+      available, else Podman -- see "marimo-podman-https" to force Podman.
+      See README.md's "HTTPS" section for details and troubleshooting.
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
@@ -156,23 +55,11 @@ runnables:
     type: service
     working_dir: repo
     description: >-
-      Serves the Marimo notebook server behind a local Caddy TLS-terminating
-      reverse proxy, forced onto the Podman backend via BACKEND=podman --
-      Podman is the backend **preferred by Janelia HPC admins** (see
+      Same as "marimo-https" above, but forces the Podman backend
+      (BACKEND=podman) -- Podman is **preferred by Janelia HPC admins** (see
       README.md's "GPU passthrough" and "Podman storage isolation"
-      sections). Without this override, the "marimo-https" runnable above
-      always prefers Apptainer when it's present on the host; use this
-      runnable instead when you specifically want Podman+HTTPS. On first
-      run, the wrapper script (container/https-wrap.sh) generates a
-      persistent self-signed cert with openssl and prints its path --
-      install it in your browser's trust store to avoid the
-      untrusted-certificate warning. Because this is a manual (non-auto_url)
-      service, Fileglancer injects SERVICE_URL_PATH, FG_PHASE_PATH,
-      FG_HOSTNAME, and FG_WORK_DIR automatically for every service-type job;
-      no env: block is needed to request them. The wrapper script uses these
-      to publish the service URL itself once Caddy's HTTPS port is open.
-      Pulls the pre-built image from ghcr.io/janeliascicomp/marimo_ai_sandbox
-      rather than building from source (see the "marimo" runnable above).
+      sections). "marimo-https" always prefers Apptainer when present, with
+      no way to force Podman otherwise.
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
@@ -208,43 +95,6 @@ runnables:
           Space-separated hostnames to allow through the Podman-only network
           egress allowlist (see README.md's "Sandbox strength" section).
           Leave unset for the default, unrestricted egress.
-    resources:
-      cpus: 8
-      memory: "8 GB"
-      walltime: "08:00"
-
-  - id: marimo-native
-    name: Start Marimo Server (native container, experimental)
-    type: service
-    auto_url: true
-    service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
-    working_dir: work
-    description: >-
-      Experimental: uses Fileglancer's built-in Apptainer container launch
-      (the manifest's container/container_args/bind_paths fields) instead of
-      this repo's container/{apptainer,podman}/marimo.sh wrapper scripts, to
-      compare against the "marimo" runnable above. Known gaps versus that
-      wrapper-script approach: no dynamic --ro-paths validation (autofs-parent
-      rejection), no GPU detection, no bsub support, and no curated env-var
-      allowlist -- bind_paths below is static. Confirmed by inspecting the
-      generated LSF script: Fileglancer runs this via "apptainer exec", not
-      "apptainer run", so the image's baked-in ENTRYPOINT
-      (/opt/app/entrypoint.sh, see container/podman/Containerfile) is NOT
-      invoked automatically -- command below must name it explicitly. Also
-      confirmed: Fileglancer auto-manages FG_PHASE_PATH (pulling_image/
-      starting) for this launch style itself, unlike the command-based
-      "marimo"/"marimo-https" runnables above. Also confirmed: apptainer's
-      --bind requires the source directory to already exist -- unlike the
-      wrapper-script runnables, where common.sh's `mkdir -p "$WORK"/home
-      "$WORK"/tmp` creates it, nothing creates ./work for this native launch
-      path, so pre_run creates it explicitly.
-    pre_run: 'mkdir -p "$FG_WORK_DIR/work"'
-    container: docker://ghcr.io/janeliascicomp/marimo_ai_sandbox:latest
-    container_args: "--contain --cleanenv --pid"
-    bind_paths:
-      - "./work:/work"
-    command: >-
-      /opt/app/entrypoint.sh --port "$FG_SERVICE_PORT" --token-password "$FG_SERVICE_TOKEN"
     resources:
       cpus: 8
       memory: "8 GB"
