@@ -18,6 +18,8 @@
 #   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" WORK=/scratch/$USER/work ./shell.sh
 #   ./shell.sh --ro-paths "/groups/scicompsoft /nrs/scicompsoft" --work /scratch/$USER/work
 #   ./shell.sh --allow litellm.int.janelia.org      # restrict egress to just this host
+#   ./shell.sh -- ttyd -p 7681 -W bash              # run a command instead of an interactive shell
+#                                                    # (used by container/terminal-wrap.sh)
 set -euo pipefail
 
 # Captured before the cd below so common.sh can resolve a relative --work
@@ -38,6 +40,12 @@ source "../common.sh"
 # shellcheck source=lib.sh
 source "./lib.sh"
 
+# common.sh deliberately does NOT strip a bare "--" (marimo.sh needs it to
+# ride through unchanged into marimo's own CLI) -- but a command override
+# for THIS script (see usage above) is naturally written with one
+# (`./shell.sh -- ttyd ...`), so strip a single leading "--" here instead.
+[[ "${1:-}" == "--" ]] && shift
+
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(--bind "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(--env "$e"); done
 GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--nv)
@@ -54,36 +62,37 @@ trap apptainer_network_cleanup EXIT
 # sandbox on whatever node LSF schedules it to.
 [[ "$ENABLE_BSUB" == "1" ]] && write_bsub_runner_apptainer "$SIF"
 
+# Any trailing args (after --allow/--ro-paths/--work are consumed by
+# common.sh above) name a command to run instead of an interactive shell --
+# e.g. `./shell.sh -- ttyd -p 7681 -W bash` for container/terminal-wrap.sh.
+COMMON_ARGS=(
+    --contain
+    --cleanenv
+    --pid
+    --home "$WORK/home:/work/home"
+    --env TMPDIR=/work/tmp
+    "${BIND_ARGS[@]}"
+    "${ENV_ARGS[@]}"
+    "${GPU_ARGS[@]}"
+    --pwd /work
+)
+
 if [[ ${#APPTAINER_EXEC_WRAP[@]} -gt 0 ]]; then
     # Egress allowlist active: start the in-container relay (and export
-    # http_proxy/https_proxy) before dropping into the interactive shell.
-    # `apptainer shell` has no hook for this, so use `apptainer exec .../bin/bash`
-    # instead -- not exec'd here (unlike the default branch below), so the
-    # EXIT trap above can stop the host-side proxy once the shell exits.
+    # http_proxy/https_proxy) before running the override command (or an
+    # interactive shell if none was given). `apptainer shell` has no hook
+    # for this, so use `apptainer exec .../bin/bash` instead -- not exec'd
+    # here (unlike the branches below), so the EXIT trap above can stop the
+    # host-side proxy once the command exits.
+    [[ $# -eq 0 ]] && set -- bash
     apptainer exec \
-        --contain \
-        --cleanenv \
-        --pid \
-        --home "$WORK/home:/work/home" \
-        --env TMPDIR=/work/tmp \
+        "${COMMON_ARGS[@]}" \
         "${APPTAINER_NET_ARGS[@]}" \
-        "${BIND_ARGS[@]}" \
         "${APPTAINER_BIND_EXTRA[@]}" \
-        "${ENV_ARGS[@]}" \
-        "${GPU_ARGS[@]}" \
-        --pwd /work \
-        "$SIF" /bin/bash "${APPTAINER_EXEC_WRAP[@]}" bash
+        "$SIF" /bin/bash "${APPTAINER_EXEC_WRAP[@]}" "$@"
     exit $?
+elif [[ $# -gt 0 ]]; then
+    exec apptainer exec "${COMMON_ARGS[@]}" "$SIF" "$@"
 fi
 
-exec apptainer shell \
-    --contain \
-    --cleanenv \
-    --pid \
-    --home "$WORK/home:/work/home" \
-    --env TMPDIR=/work/tmp \
-    "${BIND_ARGS[@]}" \
-    "${ENV_ARGS[@]}" \
-    "${GPU_ARGS[@]}" \
-    --pwd /work \
-    "$SIF"
+exec apptainer shell "${COMMON_ARGS[@]}" "$SIF"

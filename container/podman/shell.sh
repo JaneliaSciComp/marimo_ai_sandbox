@@ -13,6 +13,8 @@
 #   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" WORK=/scratch/$USER/work ./shell.sh
 #   ./shell.sh --ro-paths "/groups/scicompsoft /nrs/scicompsoft" --work /scratch/$USER/work
 #   ./shell.sh --allow litellm.int.janelia.org      # restrict egress to just this host
+#   ./shell.sh -- ttyd -p 7681 -W bash              # run a command instead of an interactive shell
+#                                                    # (used by container/terminal-wrap.sh)
 set -euo pipefail
 
 # Save the real stdin before podman run backgrounds (needed for lib.sh's
@@ -33,6 +35,12 @@ IMAGE="${IMAGE:-marimo_sandbox:latest}"
 source "../common.sh"
 # shellcheck source=lib.sh
 source "./lib.sh"
+
+# common.sh deliberately does NOT strip a bare "--" (marimo.sh needs it to
+# ride through unchanged into marimo's own CLI) -- but a command override
+# for THIS script (see usage above) is naturally written with one
+# (`./shell.sh -- ttyd ...`), so strip a single leading "--" here instead.
+[[ "${1:-}" == "--" ]] && shift
 
 podman_storage_setup_job
 cleanup() {
@@ -62,6 +70,29 @@ podman_network_setup
 # sandbox on whatever node LSF schedules it to.
 [[ "$ENABLE_BSUB" == "1" ]] && write_bsub_runner_podman "$IMAGE"
 
+# Any trailing args (after --allow/--ro-paths/--work are consumed by
+# common.sh above) name a command to run instead of an interactive shell --
+# e.g. `./shell.sh -- ttyd -p 7681 -W bash` for container/terminal-wrap.sh.
+# Default (no override): entrypoint /bin/bash with ZERO trailing args, which
+# starts an interactive shell -- this exact shape must be preserved
+# unchanged (a bare `--entrypoint /bin/bash image bash` would instead try to
+# run "bash" as a script argument to that bash, not start it interactively).
+REAL_CMD=("$@")
+if [[ -n "$PODMAN_INNER_ENTRYPOINT" ]]; then
+    # Egress allowlist active: always go through the relay-starting wrapper
+    # (which then execs the override command, or an interactive bash if
+    # none was given) regardless of whether a command override was given.
+    ENTRYPOINT_ARG="$PODMAN_INNER_ENTRYPOINT"
+    [[ ${#REAL_CMD[@]} -eq 0 ]] && REAL_CMD=(bash)
+    TRAILING_ARGS=("${PODMAN_INNER_ARGS[@]}" "${REAL_CMD[@]}")
+elif [[ ${#REAL_CMD[@]} -gt 0 ]]; then
+    ENTRYPOINT_ARG="${REAL_CMD[0]}"
+    TRAILING_ARGS=("${REAL_CMD[@]:1}")
+else
+    ENTRYPOINT_ARG="/bin/bash"
+    TRAILING_ARGS=()
+fi
+
 PODMAN_RUN_ARGS=(
     --rm -it
     --read-only
@@ -70,7 +101,7 @@ PODMAN_RUN_ARGS=(
     --cgroup-manager=cgroupfs
     --events-backend=file
     "${PODMAN_NETWORK_ARGS[@]}"
-    --entrypoint /bin/bash
+    --entrypoint "$ENTRYPOINT_ARG"
     -e HOME=/work/home
     -e TMPDIR=/work/tmp
     -w /work
@@ -78,10 +109,8 @@ PODMAN_RUN_ARGS=(
     "${ENV_ARGS[@]}"
     "${GPU_ARGS[@]}"
     "$IMAGE"
+    "${TRAILING_ARGS[@]}"
 )
-# Egress allowlist active: start the in-container relay (and export
-# http_proxy/https_proxy) before dropping into the interactive shell.
-[[ -n "$PODMAN_INNER_ENTRYPOINT" ]] && PODMAN_RUN_ARGS+=("${PODMAN_INNER_ARGS[@]}" bash)
 
 podman_run_watched PODMAN_RUN_ARGS
 exit $?

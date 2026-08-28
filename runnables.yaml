@@ -93,3 +93,94 @@ runnables:
       cpus: 8
       memory: "8 GB"
       walltime: "08:00"
+
+  - id: terminal-https
+    name: Start Web Terminal (HTTPS)
+    type: service
+    working_dir: repo
+    description: >-
+      Serves a web terminal (ttyd) inside the same read-only/writable-/work
+      sandbox as an interactive shell.sh session, behind a local Caddy
+      TLS-terminating reverse proxy -- an alternative to Marimo for driving
+      the agent CLIs (claude, codex, gemini, agy) or a plain shell from a
+      browser, with no separate terminal client needed. Manual (non-auto_url)
+      service, same publishing/cert model as "marimo-https" above (see
+      container/terminal-wrap.sh). Auth is HTTP Basic (embedded in the
+      launch URL), not a query-string token like Marimo's. Uses Apptainer if
+      available, else Podman -- see "terminal-podman-https" to force Podman.
+      NOT compatible with the network egress allowlist (see README.md's
+      "Sandbox strength" section) -- terminal-wrap.sh hard-errors if
+      --allow/$ALLOW_HOSTS is set.
+    pre_run: >-
+      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https
+      container/terminal-wrap.sh
+    parameters:
+      - flag: --ro-paths
+        name: Read-only paths
+        type: string
+        description: >-
+          Space-separated host paths bound read-only into the sandbox. Must
+          be leaf paths (e.g. /groups/scicompsoft), not bare autofs parents
+          (/groups, /nrs, /scratch). Defaults to conf/config.toml.
+      - flag: --work
+        name: Work directory
+        type: directory
+        exists: false
+        description: >-
+          Writable host directory bound to /work inside the sandbox. Defaults
+          to ./work.
+      - flag: --https-port
+        name: HTTPS port
+        type: integer
+        required: false
+        description: >-
+          Public TLS port Caddy listens on. Defaults to an arbitrary free
+          port chosen automatically at start.
+    resources:
+      cpus: 8
+      memory: "8 GB"
+      walltime: "08:00"
+
+  - id: terminal-podman-https
+    name: Start Web Terminal (Podman, HTTPS)
+    type: service
+    working_dir: repo
+    description: >-
+      Same as "terminal-https" above, but forces the Podman backend
+      (BACKEND=podman) -- Podman is **preferred by Janelia HPC admins** (see
+      README.md's "GPU passthrough" and "Podman storage isolation"
+      sections). "terminal-https" always prefers Apptainer when present,
+      with no way to force Podman otherwise.
+    pre_run: >-
+      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" BACKEND=podman pixi run --environment https
+      container/terminal-wrap.sh
+    parameters:
+      - flag: --ro-paths
+        name: Read-only paths
+        type: string
+        description: >-
+          Space-separated host paths bound read-only into the sandbox. Must
+          be leaf paths (e.g. /groups/scicompsoft), not bare autofs parents
+          (/groups, /nrs, /scratch). Defaults to conf/config.toml.
+      - flag: --work
+        name: Work directory
+        type: directory
+        exists: false
+        description: >-
+          Writable host directory bound to /work inside the sandbox. Defaults
+          to ./work.
+      - flag: --https-port
+        name: HTTPS port
+        type: integer
+        required: false
+        description: >-
+          Public TLS port Caddy listens on. Defaults to an arbitrary free
+          port chosen automatically at start.
+    resources:
+      cpus: 8
+      memory: "8 GB"
+      walltime: "08:00"
