@@ -25,11 +25,13 @@ container/common.sh                   shared bash lib: WORK/PORT/RO_PATHS/ALLOW_
 container/entrypoint.sh               Seeds + installs the pixi env under /work, then serves Marimo
 container/apptainer/marimo.def        Apptainer build recipe (installs everything at build time)
 container/apptainer/{build,marimo,shell}.sh   Apptainer build / serve / interactive-shell scripts
+container/apptainer/lib.sh            Apptainer-only: wires the shared network allowlist below
 container/podman/Containerfile        Podman/Docker build recipe
 container/podman/{build,marimo,shell}.sh      Podman build / serve / interactive-shell scripts
 container/podman/lib.sh               Podman-only hardening: storage isolation/staleness recovery,
-                                       catatonit watchdog, opt-in network egress allowlist
-container/podman/allowlist_proxy.py / relay.py   the allowlist mechanism itself (see "Egress allowlist" below)
+                                       catatonit watchdog, plus wiring the shared network allowlist
+container/allowlist_proxy.py / relay.py   the network allowlist mechanism itself, shared by both
+                                       backends (see "Sandbox strength" below)
 container/bsub-wrapper/bin/bsub       opt-in bsub wrapper -- see "Submitting LSF jobs" below
 container/app/AGENTS.md               seeded into /work; CLAUDE.md/GEMINI.md symlink to it
 container/app/agents_demo.py          starter Marimo notebook that calls an agent via subprocess
@@ -281,18 +283,21 @@ isn't:
   `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (and lowercase) are forwarded
   automatically if the launching shell already has them set, but there's no
   proxy or firewall provided by this repo by default — a compromised agent
-  or a prompt-injected tool call could reach the open internet. **Podman
-  only**, opt-in egress allowlist: pass `--allow HOST` (repeatable) or set
-  `ALLOW_HOSTS="host1 host2"` to `container/podman/marimo.sh`/`shell.sh`.
-  When set, the container runs with `--network=none` and a host-side
-  allowlist proxy (`container/podman/allowlist_proxy.py`, reached via an
-  in-container relay, `container/podman/relay.py`) permits only the listed
-  hostnames — everything else gets an HTTP 403, logged to
-  `proxy.log` inside the proxy's own private temp dir (printed at startup).
-  Adapted from
+  or a prompt-injected tool call could reach the open internet. Opt-in
+  egress allowlist, **both backends**: pass `--allow HOST` (repeatable) or
+  set `ALLOW_HOSTS="host1 host2"` to `marimo.sh`/`shell.sh`. When set, the
+  container's network is fully isolated (Podman: `--network=none`;
+  Apptainer: `--net --network none`, confirmed to give the same
+  isolated-loopback-only result -- no bridge/NAT is configured on this
+  host's unprivileged Apptainer install) and a host-side allowlist proxy
+  (`container/allowlist_proxy.py`, reached via an in-container relay,
+  `container/relay.py`) permits only the listed hostnames plus
+  `conda.anaconda.org` (always included -- `entrypoint.sh`'s first-run `pixi
+  install` needs conda-forge regardless of what a task itself needs
+  allowed) — everything else gets an HTTP 403, logged to `proxy.log` inside
+  the proxy's own private temp dir (printed at startup). Adapted from
   [JaneliaScientificComputingSystems/agentic-sandbox](https://github.com/JaneliaScientificComputingSystems/agentic-sandbox),
-  which uses the identical mechanism for its bwrap sandbox. Not available
-  for the Apptainer backend.
+  which uses the identical mechanism for its bwrap sandbox.
 - **Identity** — **not isolated**. The container runs as your real
   uid/gid with all your real HHMI/Janelia group memberships, not a scoped
   service account. This is inherent to how Fileglancer/LSF jobs execute
