@@ -112,6 +112,12 @@ WORK="${WORK:-$_PROJECT_ROOT/work}"
 PORT="${PORT:-8080}"
 unset _PROJECT_ROOT
 
+# A relative WORK (from --work/env/config.toml) is resolved against the
+# caller's original directory, not this script's own dir (the callers cd
+# there before sourcing this file) -- otherwise e.g. `--work foobar` run
+# from the project root would silently land in container/apptainer/foobar.
+[[ "$WORK" != /* ]] && WORK="${_CALLER_PWD:-$PWD}/$WORK"
+
 RO_PATHS="${RO_PATHS:-}"
 ENABLE_BSUB="${ENABLE_BSUB:-0}"
 
