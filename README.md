@@ -295,9 +295,21 @@ isn't:
   `conda.anaconda.org` (always included -- `entrypoint.sh`'s first-run `pixi
   install` needs conda-forge regardless of what a task itself needs
   allowed) — everything else gets an HTTP 403, logged to `proxy.log` inside
-  the proxy's own private temp dir (printed at startup). Adapted from
+  the proxy's own private temp dir (printed at startup). **Covers HTTPS too,
+  not just plain HTTP**: both `http_proxy` and `https_proxy` point at the
+  same relay, and the proxy understands HTTP `CONNECT` (the standard way an
+  HTTPS request reaches a proxy) -- it checks the `CONNECT` target hostname
+  against the allowlist, then just relays the still-encrypted bytes without
+  ever decrypting TLS. Confirmed live: `conda.anaconda.org` is fetched over
+  HTTPS, and the `pixi install` verification above only succeeded through
+  this proxy path. The real limit of this model: it's hostname-based (from
+  the `CONNECT` line or the plain-HTTP `Host:` header), not deep packet
+  inspection -- once a hostname is allowed, everything reachable *through*
+  that encrypted connection (redirects, CDN backends, etc.) isn't separately
+  checked. Adapted from
   [JaneliaScientificComputingSystems/agentic-sandbox](https://github.com/JaneliaScientificComputingSystems/agentic-sandbox),
-  which uses the identical mechanism for its bwrap sandbox.
+  which uses the identical mechanism (and the identical trust boundary) for
+  its bwrap sandbox.
 - **Identity** — **not isolated**. The container runs as your real
   uid/gid with all your real HHMI/Janelia group memberships, not a scoped
   service account. This is inherent to how Fileglancer/LSF jobs execute
