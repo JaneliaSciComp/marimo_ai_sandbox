@@ -20,24 +20,32 @@ and any files the agents create.
 ## Layout
 
 ```
-pixi.toml / pixi.lock         Agent-CLI-runtime env baked into the image (nodejs, uv, git, ...)
-app/pyproject.toml / pixi.lock  Seed for the user-editable Marimo/Python env (see below)
-entrypoint.sh                 Seeds + installs the pixi env under /work, then serves Marimo
-marimo.def                    Apptainer build recipe (installs everything at build time)
-Containerfile                 Podman/Docker build recipe
-build.sh / build_podman.sh    build scripts (for Apptainer or Podman image)
-start.sh / run_podman.sh        serve Marimo with the read-only sandbox model
-shell.sh / shell_podman.sh    interactive shell in the sandbox (drive the agent CLIs)
-bsub-wrapper/bin/bsub         opt-in bsub wrapper -- see "Submitting LSF jobs" below
-app/AGENTS.md                 seeded into /work; CLAUDE.md/GEMINI.md symlink to it
-app/agents_demo.py            starter Marimo notebook that calls an agent via subprocess
-work/                         runtime writable dir (created on first run; git-ignored)
+pixi.toml / pixi.lock                 Agent-CLI-runtime env baked into the image (nodejs, uv, git, ...)
+container/common.sh                   shared bash lib: WORK/PORT/RO_PATHS/ALLOW_HOSTS, binds, GPU detection, bsub setup
+container/entrypoint.sh               Seeds + installs the pixi env under /work, then serves Marimo
+container/apptainer/marimo.def        Apptainer build recipe (installs everything at build time)
+container/apptainer/{build,marimo,shell}.sh   Apptainer build / serve / interactive-shell scripts
+container/podman/Containerfile        Podman/Docker build recipe
+container/podman/{build,marimo,shell}.sh      Podman build / serve / interactive-shell scripts
+container/podman/lib.sh               Podman-only hardening: storage isolation/staleness recovery,
+                                       catatonit watchdog, opt-in network egress allowlist
+container/podman/allowlist_proxy.py / relay.py   the allowlist mechanism itself (see "Egress allowlist" below)
+container/bsub-wrapper/bin/bsub       opt-in bsub wrapper -- see "Submitting LSF jobs" below
+container/app/AGENTS.md               seeded into /work; CLAUDE.md/GEMINI.md symlink to it
+container/app/agents_demo.py          starter Marimo notebook that calls an agent via subprocess
+runnables.yaml                        Fileglancer job manifest (marimo, marimo-https, marimo-native)
+work/                                 runtime writable dir (created on first run; git-ignored)
 ```
+
+(`start.sh`/`run_podman.sh`/`shell_podman.sh`/`build_podman.sh` are the old
+names from before the `container/{apptainer,podman}/` reorganization --
+scripts below are invoked as `pixi run {build,marimo,shell}-{apptainer,podman}`,
+or directly via their paths above.)
 
 ## Build
 
-Building from source is **optional**. `./start.sh` (Apptainer) and
-`./marimo.sh` (Podman) both default to pulling the pre-built image published
+Building from source is **optional**. `pixi run marimo-apptainer` and
+`pixi run marimo-podman` both default to pulling the pre-built image published
 by `.github/workflows/publish-image.yml` at
 `ghcr.io/janeliascicomp/marimo_ai_sandbox:latest` (Apptainer converts it to a
 local `.sif` on first use) instead of building locally, falling back to a
@@ -53,7 +61,7 @@ build elsewhere and copy the `.sif` over.
 
 ```bash
 pixi install        # generates / refreshes pixi.lock (already committed)
-./build.sh          # -> marimo_sandbox.sif
+pixi run build-apptainer   # -> marimo_sandbox.sif
 ```
 
 ### Podman Build
@@ -62,7 +70,7 @@ For Podman support:
 
 ```bash
 pixi install
-./build_podman.sh   # -> builds marimo_sandbox:latest
+pixi run build-podman   # -> builds marimo_sandbox:latest
 ```
 
 ## Run the Marimo server
@@ -73,9 +81,9 @@ export ANTHROPIC_API_KEY=sk-...
 export OPENAI_API_KEY=sk-...
 export GEMINI_API_KEY=...          # or GOOGLE_API_KEY
 
-./start.sh                            # serves http://<host>:8080 (Apptainer)
+pixi run marimo-apptainer             # serves http://<host>:8080 (Apptainer)
 # or
-./run_podman.sh                     # serves http://<host>:8080 (Podman)
+pixi run marimo-podman                # serves http://<host>:8080 (Podman)
 ```
 
 Open the printed URL (with the access token) in a browser. The notebook
@@ -116,15 +124,62 @@ through automatically — no flag needed, and no harm on a non-GPU node:
   host's `nvidia-container-toolkit` setup).
 
 Verified end-to-end on an LSF `gpu_short` job: `apptainer exec --nv
-marimo_sandbox.sif nvidia-smi` correctly sees the node's GPU. Podman's CDI
-path is wired the same way but was blocked in testing by a stale
-`/etc/cdi/nvidia.yaml` on the test node (a Janelia IT-side CDI cache
-issue, not something this repo controls) — the `--device` invocation
-itself is correct for a host with a current CDI spec.
+marimo_sandbox.sif nvidia-smi` correctly sees the node's GPU.
+
+**Podman's CDI path is now also verified end-to-end** (previously blocked in
+testing by a stale `/etc/cdi/nvidia.yaml` on an earlier test node): on a real
+`gpu_l4` LSF allocation, `pixi run shell-podman` correctly reported a real
+GPU (`nvidia-smi -L` → `GPU 0: NVIDIA L4 (UUID: ...)`), including with two
+concurrent Podman jobs from the same user on the same GPU node (see "Podman
+storage isolation" below) and with the egress allowlist enabled at the same
+time. If you hit a `crun: cannot stat ... libnvidia-nscq.so...` error
+instead, that's the stale-CDI-spec issue: `/etc/cdi/nvidia.yaml` needs
+regenerating (`nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`,
+requires root) after a driver upgrade -- ask the HPC team, this repo can't
+fix it from inside a container.
+
+### Podman storage isolation (concurrent jobs on one GPU node)
+
+`container/podman/lib.sh` gives every `marimo.sh`/`shell.sh` invocation its
+own Podman `--root`/`--runroot`, keyed by `$LSB_JOBID` (or `$$-$RANDOM`
+outside LSF), instead of a single storage location shared by every job from
+that user. Without this, two concurrent Podman jobs landing on the same GPU
+node can corrupt each other's storage -- confirmed independently by
+[JaneliaScientificComputingSystems/agentic-sandbox](https://github.com/JaneliaScientificComputingSystems/agentic-sandbox)
+(a related sandboxing project on this same cluster), whose Podman wrapper
+this hardening is adapted from. The per-job store still shares the durable,
+`/scratch`-backed image cache via `--storage-opt additionalimagestore`, so a
+second concurrent job on the same node doesn't pay for a re-pull/re-build.
+Also included: automatic storage staleness recovery after a node reboot
+(`podman system migrate`/`reset`), and a watchdog for `catatonit` (Podman's
+container-init) occasionally not getting reaped before being reparented to
+PID 1, which otherwise can block `podman run` itself from ever returning.
+
+Verified live: two concurrent `shell.sh` GPU sessions on the same `gpu_l4`
+node both saw the GPU and returned their own distinct exit codes correctly,
+with no storage corruption and no leftover per-job storage directories
+afterward. One caveat found in testing, being transparent about it rather
+than overclaiming: an orphaned `catatonit` occasionally still lingers past
+job completion despite the watchdog (observed once in this testing, cleaned
+up by `bkill`, which -- per the "Running under LSF" section below -- reaps
+the entire job's process tree regardless of individual process reparenting).
+This matches a known limitation agentic-sandbox's own investigation
+documents as a low-frequency residual risk, not something this port
+introduced.
+
+Cleanup of a per-job storage directory uses `podman unshare rm -rf`, not a
+plain `rm -rf` -- this cluster has no `/etc/subuid`/`/etc/subgid` ranges (see
+`ignore_chown_errors=true` above and the Containerfile's
+`TAR_OPTIONS=--no-same-owner`, both existing workarounds for the same
+constraint), so a plain `rm -rf` run as your real user hits `Permission
+denied` on every file inside an overlay diff layer -- confirmed live. This
+is a real difference from agentic-sandbox's own cluster setup, which
+requires subuid ranges as a prerequisite; adapting straight `rm -rf` would
+have silently left every per-job storage directory behind here.
 
 ### Read-only model
 
-`start.sh` launches the container with `--contain` (host home and CWD are NOT
+`container/apptainer/marimo.sh` launches the container with `--contain` (host home and CWD are NOT
 mounted; `/tmp` is a private tmpfs) and then:
 
 - bind-mounts each path in `RO_PATHS` **read-only**;
@@ -150,7 +205,7 @@ into `/work`. Attempts to modify the host filesystem fail by design.
 > parents. Set your own with `RO_PATHS="/groups/<lab> /nrs/<lab> ..."`, or
 > equivalently:
 > ```bash
-> ./start.sh --ro-paths "/groups/<lab> /nrs/<lab> ..."
+> pixi run marimo-apptainer --ro-paths "/groups/<lab> /nrs/<lab> ..."
 > pixi run marimo "/groups/<lab> /nrs/<lab> ..."
 > ```
 > `WORK` and `PORT` accept the same treatment (`--work`/`--port` flags, or
@@ -182,12 +237,22 @@ isn't:
   `--cgroup-manager=cgroupfs`. Both need infra changes outside this repo.
   The `resources:` block in `runnables.yaml` (cpus/memory/walltime) is the
   primary real control today, enforced by LSF at the job level.
-- **Network egress** — **unrestricted**. Outbound internet access from
-  inside the container is not blocked or allowlisted. `HTTP_PROXY`/
-  `HTTPS_PROXY`/`NO_PROXY` (and lowercase) are forwarded automatically if the
-  launching shell already has them set, but there's no proxy or firewall
-  provided by this repo — a compromised agent or a prompt-injected tool call
-  could reach the open internet.
+- **Network egress** — **unrestricted by default**. Outbound internet access
+  from inside the container is not blocked or allowlisted unless you opt in.
+  `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (and lowercase) are forwarded
+  automatically if the launching shell already has them set, but there's no
+  proxy or firewall provided by this repo by default — a compromised agent
+  or a prompt-injected tool call could reach the open internet. **Podman
+  only**, opt-in egress allowlist: pass `--allow HOST` (repeatable) or set
+  `ALLOW_HOSTS="host1 host2"` to `container/podman/marimo.sh`/`shell.sh`.
+  When set, the container runs with `--network=none` and a host-side
+  allowlist proxy (`container/podman/allowlist_proxy.py`, reached via an
+  in-container relay, `container/podman/relay.py`) permits only the listed
+  hostnames — everything else gets an HTTP 403, logged to
+  `<socket-path>.log`. Adapted from
+  [JaneliaScientificComputingSystems/agentic-sandbox](https://github.com/JaneliaScientificComputingSystems/agentic-sandbox),
+  which uses the identical mechanism for its bwrap sandbox. Not available
+  for the Apptainer backend.
 - **Identity** — **not isolated**. The container runs as your real
   uid/gid with all your real HHMI/Janelia group memberships, not a scoped
   service account. This is inherent to how Fileglancer/LSF jobs execute
@@ -248,7 +313,7 @@ into `./work/.claude/skills/marimo-pair`, so an agent CLI can pair-program
 against the live notebook kernel with no extra setup and no network fetch at
 runtime. This is a *project* skill: it's only picked up by an agent CLI whose
 working directory is `/work` (the notebook's own embedded terminal, or a
-shell started via `./shell.sh` after `cd /work`). Its `reference/finding-marimo.md`
+shell started via `pixi run shell-apptainer`/`pixi run shell-podman` after `cd /work`). Its `reference/finding-marimo.md`
 has been locally modified to point directly at this sandbox's pixi-managed
 Python environment (`/work/pyproject.toml`) instead of the generic
 uv/global/sandbox decision tree.
@@ -264,9 +329,9 @@ pasted/cached copy goes stale.
 ## Interactive / terminal use
 
 ```bash
-./shell.sh          # Apptainer
+pixi run shell-apptainer   # Apptainer
 # or
-./shell_podman.sh   # Podman
+pixi run shell-podman      # Podman
 
 # then, inside the container:
 claude -p "summarize this project"
@@ -292,7 +357,7 @@ under your identity, on top of the one it's already running in), not
 something that happens implicitly.
 
 ```bash
-./start.sh --enable-bsub --ro-paths "/groups/scicompsoft /nrs/scicompsoft"
+pixi run marimo-apptainer --enable-bsub --ro-paths "/groups/scicompsoft /nrs/scicompsoft"
 ```
 
 **Apptainer only, for now.** Verified end-to-end: a wrapped job submitted

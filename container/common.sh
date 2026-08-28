@@ -10,6 +10,10 @@
 #   below for why)
 #   ENABLE_BSUB -- "1" to enable the sandboxed bsub wrapper (see
 #   container/bsub-wrapper/bin/bsub); default unset/off.
+#   ALLOW_HOSTS -- space-separated hostnames allowed through the Podman
+#   egress allowlist (container/podman/{marimo,shell}.sh only); default
+#   unset, i.e. no allowlist -- those scripts keep their existing
+#   unrestricted --net=host behavior. See podman_network_setup below.
 #
 # Also accepts on the caller's "$@" (highest precedence, overrides the env
 # var and conf/config.toml; consumed here, remaining args are left in "$@"
@@ -18,9 +22,10 @@
 #   --work PATH        or   --work=PATH
 #   --port PORT        or   --port=PORT
 #   --enable-bsub                              (no value; same as ENABLE_BSUB=1)
+#   --allow HOST       or   --allow=HOST       (repeatable; same format as ALLOW_HOSTS)
 #
 # Sets:
-#   WORK, PORT, RO_PATHS, ENABLE_BSUB
+#   WORK, PORT, RO_PATHS, ENABLE_BSUB, ALLOW_HOSTS
 #   BIND_PAIRS  -- "src:dst[:options]" strings; callers prefix with -v or --bind
 #   ENV_PAIRS   -- "NAME=VALUE" strings;        callers prefix with -e or --env
 #
@@ -63,6 +68,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         --enable-bsub)
             ENABLE_BSUB=1
+            shift
+            ;;
+        --allow)
+            [[ -n "${2:-}" ]] && ALLOW_HOSTS="${ALLOW_HOSTS:-}${ALLOW_HOSTS:+ }$2"
+            shift 2
+            ;;
+        --allow=*)
+            _val="${1#--allow=}"
+            [[ -n "$_val" ]] && ALLOW_HOSTS="${ALLOW_HOSTS:-}${ALLOW_HOSTS:+ }$_val"
             shift
             ;;
         *)
@@ -120,6 +134,7 @@ unset _PROJECT_ROOT
 
 RO_PATHS="${RO_PATHS:-}"
 ENABLE_BSUB="${ENABLE_BSUB:-0}"
+ALLOW_HOSTS="${ALLOW_HOSTS:-}"
 
 # Prepare the writable work dir.
 mkdir -p "$WORK"/home "$WORK"/tmp
