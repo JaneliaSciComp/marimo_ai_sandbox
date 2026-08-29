@@ -29,7 +29,8 @@ _CALLER_PWD="$PWD"
 
 cd "$(dirname "$0")"
 
-IMAGE="${IMAGE:-marimo_sandbox:latest}"
+IMAGE="${IMAGE:-ghcr.io/janeliascicomp/marimo_ai_sandbox:latest}"
+LOCAL_IMAGE="marimo_sandbox:latest"
 
 # shellcheck source=common.sh
 source "../common.sh"
@@ -51,9 +52,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Reports coarse progress to Fileglancer's phase file (set only when this
+# runs as a Fileglancer service job -- see container/terminal-wrap.sh, which
+# also sets this before driving this script). A no-op everywhere else.
+_set_phase() {
+    [[ -n "${FG_PHASE_PATH:-}" ]] && printf '%s' "$1" > "$FG_PHASE_PATH" 2>/dev/null
+    return 0
+}
+
+# Same pull-then-build-fallback marimo.sh already uses, not just a bare
+# local build -- without this, every FIRST-EVER shell.sh invocation on a
+# given node (e.g. the first terminal-podman-https job to land there) pays
+# a multi-minute from-scratch build (apt-get, pixi install, 5 npm installs,
+# the Antigravity CLI download) instead of a fast registry pull. Confirmed
+# live: an equivalent Apptainer cold-build was the root cause of a real
+# Fileglancer terminal-https job showing a confusing 502 for several
+# minutes -- terminal-wrap.sh's Caddy only waits 30s for the backend
+# before starting anyway, so a multi-minute cold build meant several
+# minutes of 502s that a fast pull would have avoided entirely.
 if ! podman image exists "$IMAGE" &>/dev/null; then
-    echo ">> Image '$IMAGE' not found -- building now ..."
-    bash ./build.sh
+    echo ">> Image '$IMAGE' not found locally -- pulling from registry ..."
+    _set_phase pulling_image
+    if ! podman pull "$IMAGE"; then
+        echo ">> Pull failed -- building '$LOCAL_IMAGE' from source instead ..." >&2
+        IMAGE="$LOCAL_IMAGE"
+        podman image exists "$IMAGE" &>/dev/null || bash ./build.sh
+    fi
 fi
 
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(-v "$p"); done

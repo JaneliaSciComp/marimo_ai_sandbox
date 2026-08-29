@@ -179,7 +179,15 @@ e.g. from a Fileglancer job with no other terminal access. Under the hood,
 `shell.sh`'s command-override support (`./shell.sh -- ttyd ...`, added
 alongside this feature) rather than a separate code path, so it gets the
 exact same `--ro-paths`/`--work`/GPU handling an interactive `shell.sh`
-session does.
+session does. `shell.sh` now pulls the pre-built image from `ghcr.io`
+first, same as `marimo.sh` always has, falling back to a local build only
+if the pull fails -- it used to always build locally from scratch, so the
+first-ever `terminal-https`/`shell-*` invocation on a given node paid a
+multi-minute cold build. Confirmed live: this was the actual root cause of
+a real Fileglancer `terminal-https` job showing a confusing `502` for
+several minutes (Caddy only waits 30s for `ttyd` before starting anyway --
+see the `--allow` `502` note below for the identical Caddy-vs-backend-
+timing shape).
 
 Auth is ttyd's own HTTP Basic Auth (`-c user:pass`), not a query-string
 token like Marimo's -- the launch URL embeds the credential directly
