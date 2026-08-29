@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# start.sh -- launch the Marimo sandbox with a read-only view of the host
+# marimo.sh -- launch the Marimo sandbox with a read-only view of the host
 # filesystem and a single writable work directory.
 #
 # Read-only model:
@@ -57,14 +57,15 @@
 # entirely.
 #
 # Usage:
-#   ./start.sh                                  # serve Marimo on :8080
-#   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" ./start.sh
-#   ./start.sh --ro-paths "/groups/scicompsoft /nrs/scicompsoft"
-#   WORK=/scratch/$USER/work ./start.sh
-#   ./start.sh --work /scratch/$USER/work
-#   PORT=9000 ./start.sh
-#   ./start.sh --port 9000
-#   ./start.sh --extra-marimo-flag                 # unrecognized args go to marimo
+#   ./marimo.sh                                  # serve Marimo on :8080
+#   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" ./marimo.sh
+#   ./marimo.sh --ro-paths "/groups/scicompsoft /nrs/scicompsoft"
+#   WORK=/scratch/$USER/work ./marimo.sh
+#   ./marimo.sh --work /scratch/$USER/work
+#   PORT=9000 ./marimo.sh
+#   ./marimo.sh --port 9000
+#   ./marimo.sh --allow litellm.int.janelia.org    # restrict egress to just this host
+#   ./marimo.sh --extra-marimo-flag                 # unrecognized args go to marimo
 set -euo pipefail
 
 # Captured before the cd below so common.sh can resolve a relative --work
@@ -103,10 +104,17 @@ fi
 
 # shellcheck source=common.sh
 source "../common.sh"
+# shellcheck source=lib.sh
+source "./lib.sh"
 
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(--bind "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(--env "$e"); done
 GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--nv)
+
+# Off by default (unrestricted, shared host network): see lib.sh's
+# apptainer_network_setup.
+apptainer_network_setup
+trap apptainer_network_cleanup EXIT
 
 # See common.sh's write_bsub_runner_apptainer and container/bsub-wrapper/
 # bin/bsub: when enabled, a wrapped `bsub ... -- <cmd>` re-enters this exact
@@ -116,7 +124,32 @@ GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--nv)
 echo ">> Serving Marimo on http://0.0.0.0:${PORT}  (work dir: $WORK)"
 echo ">> Read-only host binds:${RO_PATHS:- (none)}"
 [[ "$HAS_GPU" == "1" ]] && echo ">> GPU detected -- passing --nv"
+[[ -n "${ALLOW_HOSTS// /}" ]] && echo ">> Egress allowlist active: $ALLOW_HOSTS (unrestricted otherwise); proxy log: $APPTAINER_PROXY_DIR/proxy.log"
 _set_phase starting
+
+if [[ ${#APPTAINER_EXEC_WRAP[@]} -gt 0 ]]; then
+    # Egress allowlist active: Apptainer has no ENTRYPOINT to override the
+    # way Podman does, so switch from `apptainer run` (which execs the
+    # image's baked %runscript, /opt/app/entrypoint.sh) to `apptainer exec`
+    # naming that same script explicitly, wrapped so the relay starts (and
+    # http_proxy/https_proxy get set) first. Not exec'd here (unlike the
+    # default branch below): the script needs to run back in the foreground
+    # so the EXIT trap above can stop the host-side proxy afterward.
+    apptainer exec \
+        --contain \
+        --cleanenv \
+        --pid \
+        --home "$WORK/home:/work/home" \
+        --env TMPDIR=/work/tmp \
+        "${APPTAINER_NET_ARGS[@]}" \
+        "${BIND_ARGS[@]}" \
+        "${APPTAINER_BIND_EXTRA[@]}" \
+        "${ENV_ARGS[@]}" \
+        "${GPU_ARGS[@]}" \
+        "$SIF" /bin/bash "${APPTAINER_EXEC_WRAP[@]}" /opt/app/entrypoint.sh --port "$PORT" "$@"
+    exit $?
+fi
+
 exec apptainer run \
     --contain \
     --cleanenv \

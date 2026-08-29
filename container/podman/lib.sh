@@ -9,8 +9,10 @@
 # scripts/podman-run.sh, which battle-tested storage isolation, staleness
 # recovery, and the catatonit watchdog below on this same Janelia LSF
 # cluster for a related (untrusted-agent-code) sandboxing use case. The
-# network allowlist (allowlist_proxy.py/relay.py, vendored alongside this
-# file) is adapted from the same repo's bwrap-side mechanism.
+# network allowlist itself (allowlist_proxy.py/relay.py, vendored at
+# container/, shared with the Apptainer backend) is adapted from the same
+# repo's bwrap-side mechanism; see ../common.sh's network_allowlist_* for
+# the backend-agnostic parts.
 
 # _podman_storage_shared_setup -- redirects Podman storage off NFS
 # (~/.local/share/containers, this host's default, doesn't support
@@ -183,14 +185,12 @@ podman_run_watched() {
     return "$exit_code"
 }
 
-# podman_network_setup -- opt-in Podman egress allowlist, adapted from
-# agentic-sandbox's allowlist_proxy.py/relay.py (vendored in
-# container/podman/, stdlib-only Python, unmodified). Off by default: this
-# repo's Podman scripts keep their existing unrestricted --net=host unless
-# $ALLOW_HOSTS is set (via --allow, repeatable).
-#
-# Usage: podman_network_setup SCRIPT_DIR   (container/podman -- where
-#        allowlist_proxy.py/relay.py live)
+# podman_network_setup -- opt-in Podman egress allowlist. Off by default:
+# this repo's Podman scripts keep their existing unrestricted --net=host
+# unless $ALLOW_HOSTS is set (via --allow, repeatable). Thin Podman-specific
+# wrapper around common.sh's backend-agnostic
+# network_allowlist_proxy_start/network_allowlist_inner_wrap -- see
+# container/apptainer/lib.sh for the Apptainer equivalent.
 #
 # Sets:
 #   PODMAN_NETWORK_ARGS    -- array: --net=host (default), or --network=none
@@ -210,61 +210,31 @@ podman_run_watched() {
 #                             relay and exports http_proxy/https_proxy
 #                             before exec'ing through to the real command
 podman_network_setup() {
-    local script_dir="$1"
-    PODMAN_PROXY_PID=""
-    PODMAN_PROXY_SOCK=""
-    PODMAN_PROXY_DIR=""
     PODMAN_INNER_ENTRYPOINT=""
     PODMAN_INNER_ARGS=()
+
+    network_allowlist_proxy_start
+    PODMAN_PROXY_PID="$NETWORK_PROXY_PID"
+    PODMAN_PROXY_SOCK="$NETWORK_PROXY_SOCK"
+    PODMAN_PROXY_DIR="$NETWORK_PROXY_DIR"
 
     if [[ -z "${ALLOW_HOSTS// /}" ]]; then
         PODMAN_NETWORK_ARGS=(--net=host)
         return 0
     fi
 
-    # A private directory (mktemp -d), not `mktemp -u` on the socket path
-    # directly -- `-u` only prints a name it thinks is free, with no
-    # exclusive creation, so a concurrent process (or an attacker in a
-    # world-writable /tmp) can win the race and create that path first.
-    # `mktemp -d` atomically creates a directory only we can write to, and
-    # the socket lives inside it.
-    PODMAN_PROXY_DIR="$(mktemp -d /tmp/podman-sandbox-proxy.XXXXXX)"
-    PODMAN_PROXY_SOCK="$PODMAN_PROXY_DIR/proxy.sock"
-    # shellcheck disable=SC2086 -- ALLOW_HOSTS is a space-separated list,
-    # intentionally word-split into multiple allowlist_proxy.py arguments.
-    python3 "$script_dir/allowlist_proxy.py" "$PODMAN_PROXY_SOCK" $ALLOW_HOSTS \
-        > "$PODMAN_PROXY_DIR/proxy.log" 2>&1 &
-    PODMAN_PROXY_PID=$!
-    sleep 1
-    if ! kill -0 "$PODMAN_PROXY_PID" 2>/dev/null; then
-        echo "ERROR: allowlist_proxy.py failed to start -- log:" >&2
-        cat "$PODMAN_PROXY_DIR/proxy.log" >&2
-        rm -rf "$PODMAN_PROXY_DIR"
-        exit 1
-    fi
-
-    local relay_port=$((20000 + RANDOM % 20000))
     PODMAN_NETWORK_ARGS=(
         --network=none
-        -v "$script_dir/relay.py:/opt/relay.py:ro"
+        -v "$NETWORK_SCRIPTS_DIR/relay.py:/opt/relay.py:ro"
         -v "$PODMAN_PROXY_SOCK:/run/proxy.sock:ro"
     )
     PODMAN_INNER_ENTRYPOINT="/bin/bash"
-    PODMAN_INNER_ARGS=(
-        -c
-        'python3 /opt/relay.py 127.0.0.1 '"$relay_port"' /run/proxy.sock &
-         sleep 1
-         export http_proxy=http://127.0.0.1:'"$relay_port"' https_proxy=http://127.0.0.1:'"$relay_port"'
-         exec "$@"'
-        bash
-    )
+    network_allowlist_inner_wrap
+    PODMAN_INNER_ARGS=("${NETWORK_INNER_WRAP[@]}")
 }
 
 # podman_network_cleanup -- stop the host-side allowlist proxy (if any) and
-# remove its private temp dir (socket + log). No-op when the allowlist was
-# never enabled.
+# remove its socket. No-op when the allowlist was never enabled.
 podman_network_cleanup() {
-    [[ -n "${PODMAN_PROXY_PID:-}" ]] && kill "$PODMAN_PROXY_PID" 2>/dev/null
-    [[ -n "${PODMAN_PROXY_DIR:-}" && -e "$PODMAN_PROXY_DIR" ]] && rm -rf "$PODMAN_PROXY_DIR"
-    return 0
+    network_allowlist_proxy_cleanup
 }

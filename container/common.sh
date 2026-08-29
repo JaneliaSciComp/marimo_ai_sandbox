@@ -10,11 +10,11 @@
 #   below for why)
 #   ENABLE_BSUB -- "1" to enable the sandboxed bsub wrapper (see
 #   container/bsub-wrapper/bin/bsub); default unset/off.
-#   ALLOW_HOSTS -- space-separated hostnames allowed through the Podman
-#   egress allowlist (container/podman/{marimo,shell}.sh only); default
+#   ALLOW_HOSTS -- space-separated hostnames allowed through the opt-in
+#   network egress allowlist (both backends' marimo.sh/shell.sh); default
 #   unset, i.e. no allowlist -- those scripts keep their existing
-#   unrestricted --net=host behavior. See podman_network_setup in
-#   container/podman/lib.sh.
+#   unrestricted egress. See network_allowlist_proxy_start below, and
+#   container/{podman,apptainer}/lib.sh for the per-backend wiring.
 #
 # Also accepts on the caller's "$@" (highest precedence, overrides the env
 # var and conf/config.toml; consumed here, remaining args are left in "$@"
@@ -341,4 +341,117 @@ write_bsub_runner_podman() {
     echo "       (Kerberos via sssd-kcm) fails inside a rootless Podman container." >&2
     echo "       Verified working on Apptainer only; see README." >&2
     exit 1
+}
+
+# ---------------------------------------------------------------------------
+# Network egress allowlist (opt-in, shared by both backends) -- adapted from
+# JaneliaScientificComputingSystems/agentic-sandbox's
+# allowlist_proxy.py/relay.py (vendored at container/, stdlib-only Python,
+# unmodified). Off by default: both backends keep their existing
+# unrestricted egress unless $ALLOW_HOSTS is set (via --allow, repeatable).
+# Only the container-launch flag syntax (network-isolation flag, bind-mount
+# syntax, command-override mechanics) differs per backend -- see
+# container/podman/lib.sh and container/apptainer/lib.sh for those.
+# ---------------------------------------------------------------------------
+
+# Always allowed once the allowlist is active at all, on top of whatever
+# $ALLOW_HOSTS adds -- container/entrypoint.sh's first-run `pixi install`
+# (seeding the user-editable Python/marimo env into /work, see README's
+# "Python / Marimo environment" section) needs conda-forge to succeed no
+# matter what a task itself needs allowed. Confirmed live: a --allow list
+# that didn't include this failed the very first `pixi install` with
+# `client error (Connect)` fetching packages from conda.anaconda.org,
+# before the task's own command ever ran.
+NETWORK_ALLOWLIST_BASELINE_HOSTS="conda.anaconda.org"
+
+# network_allowlist_proxy_start -- starts the host-side allowlist_proxy.py
+# on a fresh Unix socket, if $ALLOW_HOSTS is non-empty. All output vars are
+# left empty (a no-op) otherwise.
+#
+# The socket lives inside a private (mode 0700) temp directory created with
+# `mktemp -d`, not `mktemp -u` on the socket path directly -- `-u` only
+# prints a name it thinks is free, with no exclusive creation, so a
+# concurrent process (or an attacker in a world-writable /tmp) can win the
+# race and create that path first. Also fails fast (clear error + exit 1,
+# with the proxy's own log printed) if allowlist_proxy.py dies immediately
+# instead of silently continuing with a broken, unenforced "allowlist".
+#
+# Sets:
+#   NETWORK_SCRIPTS_DIR -- container/, where allowlist_proxy.py/relay.py
+#                          live. Resolved from THIS FILE's own location
+#                          (via BASH_SOURCE), not the caller's cwd -- both
+#                          backend scripts cd into their own subdirectory
+#                          before sourcing common.sh.
+#   NETWORK_PROXY_PID    -- host-side allowlist_proxy.py's PID, or "" if unused
+#   NETWORK_PROXY_SOCK   -- its Unix socket path, or "" if unused
+#   NETWORK_PROXY_DIR    -- the private temp dir NETWORK_PROXY_SOCK lives in
+#                          (removed wholesale by
+#                          network_allowlist_proxy_cleanup), or "" if unused
+#   NETWORK_RELAY_PORT   -- the in-container relay's TCP port, or "" if unused
+network_allowlist_proxy_start() {
+    NETWORK_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    NETWORK_PROXY_PID=""
+    NETWORK_PROXY_SOCK=""
+    NETWORK_PROXY_DIR=""
+    NETWORK_RELAY_PORT=""
+    [[ -z "${ALLOW_HOSTS// /}" ]] && return 0
+
+    NETWORK_PROXY_DIR="$(mktemp -d /tmp/sandbox-proxy.XXXXXX)"
+    NETWORK_PROXY_SOCK="$NETWORK_PROXY_DIR/proxy.sock"
+    # Deliberately a bare `python3` from PATH, NOT the pixi-managed one this
+    # file's _CONFIG/tomllib section above insists on -- that concern was
+    # specifically about tomllib needing Python 3.11+, and about a Python
+    # that's only guaranteed to exist AFTER a container has started and
+    # entrypoint.sh has seeded $WORK/.pixi. allowlist_proxy.py needs neither:
+    # it's stdlib asyncio only (works on any Python 3.x), and it has to be
+    # running on the HOST *before* any container starts (the container
+    # bind-mounts its socket in) -- at that point $WORK/.pixi may not exist
+    # yet at all (a genuinely first-ever run), so it can't be the Python
+    # relied on here. A bare system python3 is what
+    # agentic-sandbox's own allowlist_proxy.py assumes too.
+    # shellcheck disable=SC2086 -- both vars are space-separated lists,
+    # intentionally word-split into multiple allowlist_proxy.py arguments.
+    python3 "$NETWORK_SCRIPTS_DIR/allowlist_proxy.py" "$NETWORK_PROXY_SOCK" \
+        $NETWORK_ALLOWLIST_BASELINE_HOSTS $ALLOW_HOSTS \
+        > "$NETWORK_PROXY_DIR/proxy.log" 2>&1 &
+    NETWORK_PROXY_PID=$!
+    sleep 1
+    if ! kill -0 "$NETWORK_PROXY_PID" 2>/dev/null; then
+        echo "ERROR: allowlist_proxy.py failed to start -- log:" >&2
+        cat "$NETWORK_PROXY_DIR/proxy.log" >&2
+        rm -rf "$NETWORK_PROXY_DIR"
+        exit 1
+    fi
+    NETWORK_RELAY_PORT=$((20000 + RANDOM % 20000))
+}
+
+# network_allowlist_proxy_cleanup -- stop the host-side proxy (if any) and
+# remove its private temp dir (socket + log). No-op when the allowlist was
+# never enabled.
+network_allowlist_proxy_cleanup() {
+    [[ -n "${NETWORK_PROXY_PID:-}" ]] && kill "$NETWORK_PROXY_PID" 2>/dev/null
+    [[ -n "${NETWORK_PROXY_DIR:-}" && -e "$NETWORK_PROXY_DIR" ]] && rm -rf "$NETWORK_PROXY_DIR"
+    return 0
+}
+
+# network_allowlist_inner_wrap -- the in-container wrapper command that
+# starts the relay and exports http_proxy/https_proxy before exec'ing
+# through to the real command. Only meaningful once
+# network_allowlist_proxy_start has set NETWORK_RELAY_PORT (i.e. ALLOW_HOSTS
+# was non-empty) -- callers check that themselves before using this.
+#
+# Sets: NETWORK_INNER_WRAP -- array ("-c" "<script>" "bash"), meant to be
+# invoked as the container's command with /bin/bash as the entrypoint/exec
+# target, followed by the real command and its args, e.g.:
+#   podman run --entrypoint /bin/bash ... "$IMAGE" "${NETWORK_INNER_WRAP[@]}" <real cmd...>
+#   apptainer exec ... "$SIF" /bin/bash "${NETWORK_INNER_WRAP[@]}" <real cmd...>
+network_allowlist_inner_wrap() {
+    NETWORK_INNER_WRAP=(
+        -c
+        'python3 /opt/relay.py 127.0.0.1 '"$NETWORK_RELAY_PORT"' /run/proxy.sock &
+         sleep 1
+         export http_proxy=http://127.0.0.1:'"$NETWORK_RELAY_PORT"' https_proxy=http://127.0.0.1:'"$NETWORK_RELAY_PORT"'
+         exec "$@"'
+        bash
+    )
 }

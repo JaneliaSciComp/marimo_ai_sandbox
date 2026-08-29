@@ -110,6 +110,33 @@ set -- "${_args[@]}"
 unset _args _val
 [[ -z "$HTTPS_PORT" ]] && HTTPS_PORT="$(__free_port)"
 
+# --allow/$ALLOW_HOSTS (the network egress allowlist, both backends -- see
+# container/common.sh's network_allowlist_* and container/{podman,apptainer}
+# /lib.sh) is NOT compatible with this wrapper: the allowlist puts the
+# container's network in its own isolated namespace (--network=none for
+# Podman, --net --network none for Apptainer, plus a bind-mounted proxy
+# socket), which also isolates its loopback -- Caddy, which runs OUTSIDE the
+# container on the host, can then no longer reach Marimo's
+# 127.0.0.1:$INTERNAL_PORT at all. Confirmed live: this previously failed
+# silently with a plain 502 from Caddy, no error explaining why -- hard-error
+# here instead, before wasting time building/pulling the image.
+_allow_seen="${ALLOW_HOSTS:-}"
+for _a in "$@"; do
+    case "$_a" in
+        --allow|--allow=*) _allow_seen=1 ;;
+    esac
+done
+if [[ -n "${_allow_seen// /}" ]]; then
+    echo "ERROR: --allow/\$ALLOW_HOSTS is not compatible with https-wrap.sh -- the" >&2
+    echo "       egress allowlist isolates the container's network namespace" >&2
+    echo "       (including its loopback), so Caddy (running outside the container" >&2
+    echo "       on the host) can no longer reach it; the result is a silent 502," >&2
+    echo "       not a working restricted-egress HTTPS service. Use the plain-HTTP" >&2
+    echo "       marimo-apptainer/marimo-podman tasks with --allow instead." >&2
+    exit 1
+fi
+unset _allow_seen _a
+
 INTERNAL_PORT="8080"
 WORK_VAL="${WORK:-}"
 for ((i = 1; i <= $#; i++)); do

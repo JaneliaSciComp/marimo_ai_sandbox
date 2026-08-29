@@ -89,14 +89,6 @@ runnables:
         description: >-
           Public TLS port Caddy listens on. Defaults to an arbitrary free
           port chosen automatically at start.
-      - flag: --allow
-        name: Allowed egress hosts
-        type: string
-        required: false
-        description: >-
-          Space-separated hostnames to allow through the Podman-only network
-          egress allowlist (see README.md's "Sandbox strength" section).
-          Leave unset for the default, unrestricted egress.
     resources:
       cpus: 8
       memory: "8 GB"

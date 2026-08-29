@@ -97,7 +97,7 @@ ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(-e "$e"); done
 GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--device nvidia.com/gpu=all)
 
 # Off by default (--net=host, unchanged): see lib.sh's podman_network_setup.
-podman_network_setup "$PWD"
+podman_network_setup
 
 # See common.sh's write_bsub_runner_podman and container/bsub-wrapper/bin/
 # bsub: when enabled, a wrapped `bsub ... -- <cmd>` re-enters this exact
