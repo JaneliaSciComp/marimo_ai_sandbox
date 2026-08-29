@@ -116,30 +116,77 @@ podman_storage_cleanup() {
     local dir="${1:-${PODMAN_JOB_STORAGE_DIR:-}}"
     [[ -z "$dir" ]] && return 0
     for _ in $(seq 1 30); do
-        podman unshare rm -rf "$dir" 2>/dev/null && return 0
+        podman unshare rm -rf "$dir" 2>/dev/null && break
         sleep 1
     done
     [[ -e "$dir" ]] && echo "note: couldn't clean up $dir (still busy after 30s) -- safe to remove later" >&2
+
+    # Stop rootless Podman's pause process (`catatonit -P`, the long-lived
+    # namespace keeper Podman daemonizes to PID 1 on this user's first
+    # rootless invocation and never stops on its own). Inside an LSF job
+    # this is not just cosmetic: LSF only marks a job finished once every
+    # process it spawned is gone, and the pause process -- born inside the
+    # job -- otherwise keeps the "finished" job in RUN forever. Confirmed
+    # live, twice: a real Fileglancer marimo-podman-https job hung
+    # indefinitely after Marimo quit (manually killed), and a controlled
+    # bsub reproduction hung the same way until exactly this pause process
+    # was killed, at which point LSF immediately reported DONE. `podman
+    # system migrate` is the sanctioned way to stop it (same call
+    # _podman_storage_shared_setup already makes at startup -- which is
+    # also why back-to-back jobs on one node masked this: each job's
+    # startup migrate killed the PREVIOUS job's leftover pause process).
+    # Safe with respect to concurrent jobs on the same node: a running
+    # container keeps its namespaces alive via its own processes, and the
+    # next podman invocation just re-creates the pause process on demand.
+    podman system migrate 2>/dev/null || true
     return 0
 }
 
-# _podman_kill_orphaned_catatonit -- kill any catatonit (Podman's tiny
-# container-init) belonging to THIS job specifically that has been
-# reparented to PID 1 (i.e. actually orphaned, not just a sibling job's
-# still-healthy one, and not our own container's still-running one -- both
-# conditions, PPID==1 AND referencing our own job's storage path, must hold
-# together; agentic-sandbox's ADMIN-NOTES documents hitting a real bug from
-# checking only one). catatonit occasionally isn't reaped by Podman's own
-# monitor before being reparented, which then blocks `podman run` itself
-# from ever returning -- a known, independently-confirmed issue on this
-# exact cluster (Janelia's own Harbor/LSF fork hits the same thing).
-_podman_kill_orphaned_catatonit() {
-    local job_dir="$1" pid
-    [[ -z "$job_dir" ]] && return 0
-    for pid in $(pgrep -u "$USER" -x catatonit 2>/dev/null); do
-        [[ "$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')" == "1" ]] || continue
-        grep -q "$job_dir" "/proc/$pid/mountinfo" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+# _podman_resolve_catatonit_pid -- resolve the exact host PID of a
+# container's own init process (catatonit) via `podman inspect
+# --format '{{.State.Pid}}'`, given its --cidfile. Polls briefly since the
+# cidfile only appears once the container has actually started (a few
+# seconds in on a cold pull/build).
+#
+# Echoes the PID on success, nothing on failure/timeout (e.g. an older
+# Podman without --cidfile support, or the container exiting before we
+# manage to resolve it) -- callers treat that as "can't track this one,
+# skip cleanup" rather than a hard error.
+_podman_resolve_catatonit_pid() {
+    local cidfile="$1" cid pid
+    for _ in $(seq 1 30); do
+        [[ -s "$cidfile" ]] && break
+        sleep 1
     done
+    [[ -s "$cidfile" ]] || return 0
+    cid="$(cat "$cidfile" 2>/dev/null)"
+    [[ -z "$cid" ]] && return 0
+    pid="$(podman "${PODMAN_GLOBAL_ARGS[@]}" inspect --format '{{.State.Pid}}' "$cid" 2>/dev/null)"
+    [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" != "0" ]] && echo "$pid"
+}
+
+# _podman_kill_if_orphaned_catatonit -- kill the given PID (resolved once,
+# up front, via _podman_resolve_catatonit_pid -- see there for why an exact
+# PID match rather than a heuristic scan) only if it's both still alive and
+# actually orphaned (reparented to PID 1). catatonit occasionally isn't
+# reaped by Podman's own monitor before being reparented, which then blocks
+# `podman run` itself from ever returning -- a known, independently-
+# confirmed issue on this exact cluster (Janelia's own Harbor/LSF fork hits
+# the same thing).
+#
+# NOTE this only covers the CONTAINER-INIT catatonit. Rootless Podman also
+# runs a second, unrelated catatonit as its long-lived pause process
+# (`catatonit -P`, PPID 1 by design, never exits on its own) -- that one is
+# NOT an orphan to be reaped here, it's handled at job teardown by
+# podman_storage_cleanup's `podman system migrate` (see there; it, not the
+# container init, was the actual cause of a real Fileglancer job hanging
+# in RUN forever after its service quit).
+_podman_kill_if_orphaned_catatonit() {
+    local pid="$1"
+    [[ -z "$pid" ]] && return 0
+    kill -0 "$pid" 2>/dev/null || return 0
+    [[ "$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')" == "1" ]] || return 0
+    kill -9 "$pid" 2>/dev/null
     return 0
 }
 
@@ -160,18 +207,42 @@ _podman_kill_orphaned_catatonit() {
 # that only runs once `podman run` returns would never get a chance to
 # fire).
 #
+# Tracks the container's own init process (catatonit) by its exact host PID
+# -- resolved once via --cidfile + `podman inspect`, not by re-scanning
+# /proc/*/mountinfo for a job-dir substring on every check. The mountinfo
+# approach (this function's previous implementation) only matched while the
+# container's own mounts were still live -- once `podman run`'s `--rm`
+# teardown unmounts everything, the substring stops matching, so an orphan
+# appearing right at teardown time could never be caught; it also matched
+# rootless Podman's unrelated pause process (`catatonit -P`, PPID 1 by
+# design -- see _podman_kill_if_orphaned_catatonit's NOTE) whenever that
+# process's mountinfo happened to reference the job dir, i.e. it could
+# both miss the real target and hit the wrong one. An exact PID, known
+# from the start, has neither problem.
+#
 # Returns the real exit code of `podman run` (does not exit the shell --
 # caller does `podman_run_watched ARGS_VAR; exit $?`).
 podman_run_watched() {
     local -n _args_ref="$1"
-    local job_dir="${PODMAN_JOB_STORAGE_DIR:-}"
+    local cidfile
+    cidfile="$(mktemp -u /tmp/podman-cid-XXXXXX)"
 
-    podman "${PODMAN_GLOBAL_ARGS[@]}" run "${_args_ref[@]}" <&3 &
+    podman "${PODMAN_GLOBAL_ARGS[@]}" run --cidfile "$cidfile" "${_args_ref[@]}" <&3 &
     local podman_pid=$!
+
+    # Resolved once, here in podman_run_watched's own scope (not inside the
+    # watchdog subshell below -- a subshell's variable writes don't survive
+    # past its own exit, and by the time podman_pid itself has exited the
+    # --rm'd container is already gone, too late to `podman inspect` it
+    # again). Blocks up to ~30s on a cold pull/build, same as the image
+    # pull itself already can -- nothing to watch for yet at that point
+    # anyway, since no catatonit exists before the container has started.
+    local catatonit_pid
+    catatonit_pid="$(_podman_resolve_catatonit_pid "$cidfile")"
 
     (
         while kill -0 "$podman_pid" 2>/dev/null; do
-            _podman_kill_orphaned_catatonit "$job_dir"
+            _podman_kill_if_orphaned_catatonit "$catatonit_pid"
             sleep 2
         done
     ) &
@@ -181,7 +252,11 @@ podman_run_watched() {
     wait "$podman_pid" || exit_code=$?
     kill "$watchdog_pid" 2>/dev/null
     wait "$watchdog_pid" 2>/dev/null || true
-    _podman_kill_orphaned_catatonit "$job_dir"
+    # One more check right after podman_pid itself has exited -- specifically
+    # the race described above (catatonit orphaned right as/after `podman
+    # run` returns, missed by the watchdog's last iteration).
+    _podman_kill_if_orphaned_catatonit "$catatonit_pid"
+    rm -f "$cidfile"
     return "$exit_code"
 }
 
