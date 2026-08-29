@@ -73,7 +73,20 @@ done
 set -- "${_args[@]}"
 unset _args _val
 [[ -z "$HTTPS_PORT" ]] && HTTPS_PORT="$(caddy_free_port)"
+# caddy_free_port() only probes-then-releases a port (bind to 0, read the
+# OS-assigned number, close) -- it doesn't hold it, so two calls in a row
+# can (rarely) return the same number. Retry until INTERNAL_PORT actually
+# differs from HTTPS_PORT, rather than let ttyd and Caddy silently contend
+# for the same port.
 INTERNAL_PORT="$(caddy_free_port)"
+for _ in $(seq 1 10); do
+    [[ "$INTERNAL_PORT" != "$HTTPS_PORT" ]] && break
+    INTERNAL_PORT="$(caddy_free_port)"
+done
+if [[ "$INTERNAL_PORT" == "$HTTPS_PORT" ]]; then
+    echo "ERROR: could not allocate distinct HTTPS/internal ports after 10 tries" >&2
+    exit 1
+fi
 
 # See https-wrap.sh's identical guard for the full explanation: --allow
 # isolates the container's loopback along with the rest of its network,
@@ -113,7 +126,12 @@ elif [[ -f "$WORK_VAL/.terminal-token" ]]; then
 else
     mkdir -p "$WORK_VAL"
     TOKEN="$(openssl rand -hex 16)"
-    printf '%s' "$TOKEN" > "$WORK_VAL/.terminal-token"
+    # Create with restrictive permissions from the start (umask in a
+    # subshell, not a chmod afterward) -- this is an HTTP Basic Auth
+    # password; a normal umask (e.g. 022) would otherwise leave it
+    # world-readable for the window between creation and a separate chmod,
+    # and permanently so on any host whose default umask allows it.
+    (umask 077 && printf '%s' "$TOKEN" > "$WORK_VAL/.terminal-token")
 fi
 
 # Pick the backend, same auto-detection/override as https-wrap.sh.

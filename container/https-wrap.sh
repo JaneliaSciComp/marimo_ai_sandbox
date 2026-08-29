@@ -157,7 +157,10 @@ elif [[ -f "$WORK_VAL/.marimo-token" ]]; then
 else
     mkdir -p "$WORK_VAL"
     TOKEN="$(openssl rand -hex 16)"
-    printf '%s' "$TOKEN" > "$WORK_VAL/.marimo-token"
+    # Create with restrictive permissions from the start (umask in a
+    # subshell, not a chmod afterward) -- see terminal-wrap.sh's identical
+    # fix for .terminal-token for the full reasoning.
+    (umask 077 && printf '%s' "$TOKEN" > "$WORK_VAL/.marimo-token")
 fi
 
 # Pick the backend to run Marimo through. Default (BACKEND unset): the same
