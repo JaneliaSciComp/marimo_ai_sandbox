@@ -320,6 +320,13 @@ into `/work`. Attempts to modify the host filesystem fail by design.
 > pixi run marimo-apptainer --ro-paths "/groups/<lab> /nrs/<lab> ..."
 > pixi run marimo "/groups/<lab> /nrs/<lab> ..."
 > ```
+> Three single-directory slots (`--ro-path-1`/`--ro-path-2`/`--ro-path-3`) are
+> also accepted, each bound the same way as one entry in `--ro-paths` --
+> these exist so Fileglancer can offer a directory picker for a few common
+> extra paths instead of forcing free-text entry. Both forms combine (all
+> given `--ro-path-N` values are added to whatever `--ro-paths`/`RO_PATHS`
+> resolves to), regardless of which order they're given in.
+>
 > `WORK` and `PORT` accept the same treatment (`--work`/`--port` flags, or
 > the 2nd/3rd positional pixi task arguments — pass `""` to skip one and set
 > a later one, e.g. `pixi run marimo "" "" 9999` for just the port). CLI

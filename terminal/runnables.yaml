@@ -32,13 +32,6 @@ runnables:
       PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https
       container/terminal-wrap.sh
     parameters:
-      - flag: --ro-paths
-        name: Read-only paths
-        type: string
-        description: >-
-          Space-separated host paths bound read-only into the sandbox. Must
-          be leaf paths (e.g. /groups/scicompsoft), not bare autofs parents
-          (/groups, /nrs, /scratch). Defaults to conf/config.toml.
       - flag: --work
         name: Work directory
         type: directory
@@ -46,6 +39,38 @@ runnables:
         description: >-
           Writable host directory bound to /work inside the sandbox. Defaults
           to ./work.
+      - flag: --ro-path-1
+        name: Read-only path 1
+        type: directory
+        required: false
+        exists: true
+        description: >-
+          A host directory to bind read-only into the sandbox. Must be a leaf
+          path (e.g. /groups/scicompsoft), not a bare autofs parent (/groups,
+          /nrs, /scratch). Combined with "Read-only path 2/3" and "Read-only
+          paths" below, if given.
+      - flag: --ro-path-2
+        name: Read-only path 2
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-path-3
+        name: Read-only path 3
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-paths
+        name: Read-only paths (advanced)
+        type: string
+        required: false
+        description: >-
+          Space-separated host paths bound read-only into the sandbox, for
+          more than 3 paths or when scripting -- same leaf-path rule as
+          "Read-only path 1" above. Combined with any "Read-only path"
+          slots above, if given. Defaults to conf/config.toml when none of
+          these read-only path parameters are given.
       - flag: --https-port
         name: HTTPS port
         type: integer
@@ -74,13 +99,6 @@ runnables:
       PATH="$HOME/.pixi/bin:$PATH" BACKEND=podman pixi run --environment https
       container/terminal-wrap.sh
     parameters:
-      - flag: --ro-paths
-        name: Read-only paths
-        type: string
-        description: >-
-          Space-separated host paths bound read-only into the sandbox. Must
-          be leaf paths (e.g. /groups/scicompsoft), not bare autofs parents
-          (/groups, /nrs, /scratch). Defaults to conf/config.toml.
       - flag: --work
         name: Work directory
         type: directory
@@ -88,6 +106,38 @@ runnables:
         description: >-
           Writable host directory bound to /work inside the sandbox. Defaults
           to ./work.
+      - flag: --ro-path-1
+        name: Read-only path 1
+        type: directory
+        required: false
+        exists: true
+        description: >-
+          A host directory to bind read-only into the sandbox. Must be a leaf
+          path (e.g. /groups/scicompsoft), not a bare autofs parent (/groups,
+          /nrs, /scratch). Combined with "Read-only path 2/3" and "Read-only
+          paths" below, if given.
+      - flag: --ro-path-2
+        name: Read-only path 2
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-path-3
+        name: Read-only path 3
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-paths
+        name: Read-only paths (advanced)
+        type: string
+        required: false
+        description: >-
+          Space-separated host paths bound read-only into the sandbox, for
+          more than 3 paths or when scripting -- same leaf-path rule as
+          "Read-only path 1" above. Combined with any "Read-only path"
+          slots above, if given. Defaults to conf/config.toml when none of
+          these read-only path parameters are given.
       - flag: --https-port
         name: HTTPS port
         type: integer
