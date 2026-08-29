@@ -1,4 +1,4 @@
-name: Marimo AI Sandbox - Web Terminal
+name: Web Terminal AI Sandbox
 description: >-
   Browser-based terminal (ttyd) inside the same read-only Apptainer/Podman
   sandbox as the Marimo AI Sandbox app -- an alternative to Marimo for
