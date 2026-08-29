@@ -398,6 +398,17 @@ network_allowlist_proxy_start() {
 
     NETWORK_PROXY_DIR="$(mktemp -d /tmp/sandbox-proxy.XXXXXX)"
     NETWORK_PROXY_SOCK="$NETWORK_PROXY_DIR/proxy.sock"
+    # Deliberately a bare `python3` from PATH, NOT the pixi-managed one this
+    # file's _CONFIG/tomllib section above insists on -- that concern was
+    # specifically about tomllib needing Python 3.11+, and about a Python
+    # that's only guaranteed to exist AFTER a container has started and
+    # entrypoint.sh has seeded $WORK/.pixi. allowlist_proxy.py needs neither:
+    # it's stdlib asyncio only (works on any Python 3.x), and it has to be
+    # running on the HOST *before* any container starts (the container
+    # bind-mounts its socket in) -- at that point $WORK/.pixi may not exist
+    # yet at all (a genuinely first-ever run), so it can't be the Python
+    # relied on here. A bare system python3 is what
+    # agentic-sandbox's own allowlist_proxy.py assumes too.
     # shellcheck disable=SC2086 -- both vars are space-separated lists,
     # intentionally word-split into multiple allowlist_proxy.py arguments.
     python3 "$NETWORK_SCRIPTS_DIR/allowlist_proxy.py" "$NETWORK_PROXY_SOCK" \

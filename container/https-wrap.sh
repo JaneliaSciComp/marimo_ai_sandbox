@@ -110,11 +110,13 @@ set -- "${_args[@]}"
 unset _args _val
 [[ -z "$HTTPS_PORT" ]] && HTTPS_PORT="$(__free_port)"
 
-# --allow/$ALLOW_HOSTS (Podman's network egress allowlist) is NOT compatible
-# with this wrapper: the allowlist puts the container's network in its own
-# isolated namespace (--network=none plus a bind-mounted proxy socket, see
-# container/podman/lib.sh), which also isolates its loopback -- Caddy, which
-# runs OUTSIDE the container on the host, can then no longer reach Marimo's
+# --allow/$ALLOW_HOSTS (the network egress allowlist, both backends -- see
+# container/common.sh's network_allowlist_* and container/{podman,apptainer}
+# /lib.sh) is NOT compatible with this wrapper: the allowlist puts the
+# container's network in its own isolated namespace (--network=none for
+# Podman, --net --network none for Apptainer, plus a bind-mounted proxy
+# socket), which also isolates its loopback -- Caddy, which runs OUTSIDE the
+# container on the host, can then no longer reach Marimo's
 # 127.0.0.1:$INTERNAL_PORT at all. Confirmed live: this previously failed
 # silently with a plain 502 from Caddy, no error explaining why -- hard-error
 # here instead, before wasting time building/pulling the image.
