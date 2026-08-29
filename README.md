@@ -40,9 +40,13 @@ container/caddy-lib.sh                shared Caddy/TLS-cert helpers used by http
 container/https-wrap.sh               fronts Marimo with Caddy TLS -- see "HTTPS (optional)" below
 container/terminal-wrap.sh            fronts a web terminal (ttyd) with Caddy TLS, an alternative
                                        to Marimo -- see "Web terminal" below
-runnables.yaml                        Fileglancer job manifest (marimo-https, marimo-podman-https,
-                                       terminal-https, terminal-podman-https -- HTTPS-only, see
-                                       "HTTPS (optional)" below)
+runnables.yaml                        Fileglancer app manifest: "Marimo AI Sandbox" (marimo-https,
+                                       marimo-podman-https -- HTTPS-only, see "HTTPS (optional)"
+                                       below)
+terminal/runnables.yaml               Separate Fileglancer app manifest: "Marimo AI Sandbox - Web
+                                       Terminal" (terminal-https, terminal-podman-https -- see "Web
+                                       terminal" below for why this is a second manifest, not part
+                                       of the one above)
 work/                                 runtime writable dir (created on first run; git-ignored)
 ```
 
@@ -171,6 +175,19 @@ the image via `pixi.toml`) instead:
 pixi run terminal-https                    # serves https://<host>:<port>
 BACKEND=podman pixi run terminal-https     # force Podman
 ```
+
+**Fileglancer app**: the web terminal's runnables live in their own
+manifest, `terminal/runnables.yaml`, rather than the root `runnables.yaml`
+-- Fileglancer discovers every `runnables.yaml` in a repo and offers each
+as an independently addable app, so "Marimo AI Sandbox" and "Marimo AI
+Sandbox - Web Terminal" show up as two separate app cards instead of one,
+even though both live in this same repo. This means script paths in
+`terminal/runnables.yaml`'s `command:` fields are one level up
+(`../container/terminal-wrap.sh`, not `container/terminal-wrap.sh`) --
+Fileglancer runs a job from the directory containing whichever manifest
+it came from, not always the repo root, and `pixi run <path>` (unlike a
+declared pixi *task* name) resolves a relative path against that same
+directory, not the workspace root.
 
 Useful for driving the agent CLIs (`claude`, `codex`, `gemini`, `agy`) or a
 plain shell from a browser, with no separate SSH/terminal client needed --
