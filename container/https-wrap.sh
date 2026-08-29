@@ -261,5 +261,31 @@ caddy_start "$HTTPS_PORT" "$INTERNAL_PORT"
 caddy_publish_service_url "$HTTPS_PORT" "$MARIMO_PID" \
     "https://${FG_HOSTNAME:-$HOST_NAME}:${HTTPS_PORT}/?access_token=${TOKEN}"
 
-wait "$CADDY_PID"
+# Wait on EITHER Marimo or Caddy, not just Caddy -- otherwise quitting Marimo
+# from its own UI (its "Shutdown" button, or the notebook process just
+# exiting) kills MARIMO_PID but leaves Caddy running and this script blocked
+# on it, so the whole job/service never ends: it just 502s forever until the
+# walltime limit kills it. Confirmed live: this happened on a real
+# Fileglancer job. `wait -n` (bash 4.3+) returns as soon as either finishes;
+# the EXIT trap's cleanup() then kills whichever is still alive.
+#
+# `|| true`: under `set -e`, a nonzero `wait -n` return would otherwise abort
+# the script here directly, skipping the cleanup/messaging below -- and it
+# does legitimately return nonzero (127, "no such job") if the dying process
+# was several layers removed from this shell's direct child (e.g. something
+# deep inside the container exiting first, which is how a real crash looks,
+# not just Marimo's own graceful shutdown) and already got reaped before this
+# line runs -- confirmed live. Don't try to recover its exact exit code in
+# that case either (a second `wait` on an already-reaped pid just fails the
+# same way) -- 0 for the expected/graceful case, 1 if Caddy's the one that
+# died, is enough for LSF/Fileglancer to see the job as finished either way.
+wait -n "$MARIMO_PID" "$CADDY_PID" 2>/dev/null || true
+if ! kill -0 "$MARIMO_PID" 2>/dev/null; then
+    echo ">> Marimo exited -- shutting down Caddy and this job too."
+    _exit=0
+else
+    echo ">> Caddy exited unexpectedly -- shutting down Marimo too."
+    _exit=1
+fi
 wait "${PUBLISHER_PID:-}" 2>/dev/null || true
+exit "$_exit"

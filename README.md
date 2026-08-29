@@ -1,9 +1,9 @@
 # Marimo AI Sandbox
 
-A reproducible [Apptainer](https://apptainer.org/) container that runs a
-[Marimo](https://marimo.io/) reactive-notebook server with a Python environment
-built by [pixi](https://pixi.sh/), and bundles four AI coding-agent CLIs plus
-their ACP adapters:
+A reproducible [Apptainer](https://apptainer.org/)/[Podman](https://podman.io/)
+container that runs a [Marimo](https://marimo.io/) reactive-notebook server
+with a Python environment built by [pixi](https://pixi.sh/), and bundles four
+AI coding-agent CLIs plus their ACP adapters:
 
 | CLI | Agent | Install source | ACP |
 |-----|-------|----------------|-----|
