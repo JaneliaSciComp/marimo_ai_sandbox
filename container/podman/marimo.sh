@@ -11,9 +11,11 @@
 # Janelia HPC notes:
 #   --cgroup-manager=cgroupfs  no systemd user session on compute nodes
 #   --events-backend=file      no dbus session available
-#   --userns=keep-id omitted   requires an /etc/subuid range; not requested by
-#                              default for any account on this cluster (see
-#                              README's "Podman Build" prerequisite note)
+#   --userns=keep-id omitted   by default -- requires an /etc/subuid range,
+#                              which isn't requested by default for any
+#                              account on this cluster (see README's "Podman
+#                              Build" prerequisite note). Opt in with
+#                              --keep-id/KEEP_ID=1 once you have one.
 #   Storage redirected to /scratch to avoid NFS xattr failures, with a
 #   per-job isolated --root/--runroot so concurrent Podman jobs from the
 #   same user on the same GPU node don't corrupt each other's storage
@@ -44,6 +46,7 @@
 #   PORT=9000 ./marimo.sh
 #   ./marimo.sh --port 9000
 #   ./marimo.sh --allow litellm.int.janelia.org    # restrict egress to just this host
+#   ./marimo.sh --keep-id                        # run as your real uid/gid (needs a subuid range)
 #   ./marimo.sh --extra-marimo-flag              # unrecognized args go to marimo
 #   IMAGE=marimo_sandbox:latest ./marimo.sh       # skip the registry, build locally
 set -euo pipefail
@@ -96,6 +99,10 @@ ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(-e "$e"); done
 # nvidia-container-toolkit's CDI spec (/etc/cdi/nvidia.yaml), which rootless
 # Podman supports directly with no extra runtime flags needed.
 GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--device nvidia.com/gpu=all)
+# See common.sh's KEEP_ID doc comment -- runs the container as your real
+# host uid/gid instead of root-mapped-through-the-user-namespace. Opt-in,
+# and requires an /etc/subuid/subgid range (see README's "Podman Build").
+KEEP_ID_ARGS=(); [[ "$KEEP_ID" == "1" ]] && KEEP_ID_ARGS+=(--userns=keep-id --user "$(id -u):$(id -g)")
 
 # Off by default (--net=host, unchanged): see lib.sh's podman_network_setup.
 podman_network_setup
@@ -125,6 +132,7 @@ PODMAN_RUN_ARGS=(
     "${BIND_ARGS[@]}"
     "${ENV_ARGS[@]}"
     "${GPU_ARGS[@]}"
+    "${KEEP_ID_ARGS[@]}"
 )
 # Egress allowlist active: override the image's baked ENTRYPOINT so the
 # in-container relay starts (and http_proxy/https_proxy get set) before the

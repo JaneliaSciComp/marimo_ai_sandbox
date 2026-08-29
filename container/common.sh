@@ -10,6 +10,13 @@
 #   below for why)
 #   ENABLE_BSUB -- "1" to enable the sandboxed bsub wrapper (see
 #   container/bsub-wrapper/bin/bsub); default unset/off.
+#   KEEP_ID -- "1" to run the Podman backend's container as your real host
+#   uid/gid (--userns=keep-id --user "$(id -u):$(id -g)") instead of root
+#   mapped through the user namespace; default unset/off. Requires an
+#   /etc/subuid//etc/subgid range for your account (see README's "Podman
+#   Build" prerequisite note) -- Podman errors out plainly if you don't have
+#   one. No-op on the Apptainer backend, which already runs as your real
+#   identity by default with no separate flag needed.
 #   ALLOW_HOSTS -- space-separated hostnames allowed through the opt-in
 #   network egress allowlist (both backends' marimo.sh/shell.sh); default
 #   unset, i.e. no allowlist -- those scripts keep their existing
@@ -26,10 +33,11 @@
 #   --work PATH        or   --work=PATH
 #   --port PORT        or   --port=PORT
 #   --enable-bsub                              (no value; same as ENABLE_BSUB=1)
+#   --keep-id                                  (no value; same as KEEP_ID=1)
 #   --allow HOST       or   --allow=HOST       (repeatable; same format as ALLOW_HOSTS)
 #
 # Sets:
-#   WORK, PORT, RO_PATHS, ENABLE_BSUB, ALLOW_HOSTS
+#   WORK, PORT, RO_PATHS, ENABLE_BSUB, KEEP_ID, ALLOW_HOSTS
 #   BIND_PAIRS  -- "src:dst[:options]" strings; callers prefix with -v or --bind
 #   ENV_PAIRS   -- "NAME=VALUE" strings;        callers prefix with -e or --env
 #
@@ -81,6 +89,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --enable-bsub)
             ENABLE_BSUB=1
+            shift
+            ;;
+        --keep-id)
+            KEEP_ID=1
             shift
             ;;
         --allow)
@@ -161,6 +173,7 @@ unset _PROJECT_ROOT
 
 RO_PATHS="${RO_PATHS:-}"
 ENABLE_BSUB="${ENABLE_BSUB:-0}"
+KEEP_ID="${KEEP_ID:-0}"
 ALLOW_HOSTS="${ALLOW_HOSTS:-}"
 
 # Prepare the writable work dir.

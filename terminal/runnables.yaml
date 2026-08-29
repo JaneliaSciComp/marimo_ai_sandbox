@@ -78,6 +78,17 @@ runnables:
         description: >-
           Public TLS port Caddy listens on. Defaults to an arbitrary free
           port chosen automatically at start.
+      - flag: --keep-id
+        name: Run as your real identity (Podman only)
+        type: boolean
+        required: false
+        description: >-
+          Podman only: run the container as your real host uid/gid instead
+          of root-mapped-through-the-user-namespace. No effect if this ends
+          up using Apptainer, which already runs as your real identity by
+          default. Requires an /etc/subuid//etc/subgid range for your
+          account (ask HPC -- see README.md's "Podman Build" section);
+          Podman errors out plainly if you don't have one.
     resources:
       cpus: 8
       memory: "8 GB"
@@ -145,6 +156,17 @@ runnables:
         description: >-
           Public TLS port Caddy listens on. Defaults to an arbitrary free
           port chosen automatically at start.
+      - flag: --keep-id
+        name: Run as your real identity (Podman only)
+        type: boolean
+        required: false
+        description: >-
+          Podman only: run the container as your real host uid/gid instead
+          of root-mapped-through-the-user-namespace. No effect if this ends
+          up using Apptainer, which already runs as your real identity by
+          default. Requires an /etc/subuid//etc/subgid range for your
+          account (ask HPC -- see README.md's "Podman Build" section);
+          Podman errors out plainly if you don't have one.
     resources:
       cpus: 8
       memory: "8 GB"

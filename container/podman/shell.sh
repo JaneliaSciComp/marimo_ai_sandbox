@@ -84,6 +84,8 @@ ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(-e "$e"); done
 [[ -f "$WORK/.marimo-pair.env" ]] && ENV_ARGS+=(--env-file "$WORK/.marimo-pair.env")
 # See marimo.sh for why CDI (--device nvidia.com/gpu=all) rather than --gpus.
 GPU_ARGS=();  [[ "$HAS_GPU" == "1" ]] && GPU_ARGS+=(--device nvidia.com/gpu=all)
+# See common.sh's KEEP_ID doc comment and marimo.sh for details.
+KEEP_ID_ARGS=(); [[ "$KEEP_ID" == "1" ]] && KEEP_ID_ARGS+=(--userns=keep-id --user "$(id -u):$(id -g)")
 
 # Off by default (--net=host, unchanged): see lib.sh's podman_network_setup.
 podman_network_setup
@@ -131,6 +133,7 @@ PODMAN_RUN_ARGS=(
     "${BIND_ARGS[@]}"
     "${ENV_ARGS[@]}"
     "${GPU_ARGS[@]}"
+    "${KEEP_ID_ARGS[@]}"
     "$IMAGE"
     "${TRAILING_ARGS[@]}"
 )
