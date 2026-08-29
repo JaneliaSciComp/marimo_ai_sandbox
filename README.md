@@ -67,6 +67,26 @@ pixi run build-apptainer   # -> marimo_sandbox.sif
 
 ### Podman Build
 
+**⚠️ Before your first Podman run ever: rootless Podman needs a
+`/etc/subuid`/`/etc/subgid` range for your account, and that's not
+something you can set up yourself — reach out to the HPC team first** if
+you haven't run rootless Podman on this cluster before. Without it, Podman
+can't create its user namespace at all, and you'll never get as far as the
+storage setup this repo's scripts do automatically. This has to be
+requested per-account, individually, by HPC -- it isn't granted by
+default.
+
+A range-enabled account isn't required for anything in this repo to work
+-- everything described below (`ignore_chown_errors=true`,
+`TAR_OPTIONS=--no-same-owner`, `podman unshare rm -rf` instead of a plain
+`rm -rf`) is a fallback for the no-range case, expected to remain harmless
+for an account that *has* a range too (not yet verified live either way
+for that combination). This repo doesn't currently take advantage of a
+range being present, e.g. to run containers as your real UID via
+`--userns=keep-id` instead of root (see the "Identity" bullet below) --
+that's a real possible follow-up now that a range can be requested, not
+something implemented yet.
+
 For Podman support:
 
 ```bash
@@ -179,14 +199,16 @@ documents as a low-frequency residual risk, not something this port
 introduced.
 
 Cleanup of a per-job storage directory uses `podman unshare rm -rf`, not a
-plain `rm -rf` -- this cluster has no `/etc/subuid`/`/etc/subgid` ranges (see
-`ignore_chown_errors=true` above and the Containerfile's
-`TAR_OPTIONS=--no-same-owner`, both existing workarounds for the same
-constraint), so a plain `rm -rf` run as your real user hits `Permission
-denied` on every file inside an overlay diff layer -- confirmed live. This
-is a real difference from agentic-sandbox's own cluster setup, which
-requires subuid ranges as a prerequisite; adapting straight `rm -rf` would
-have silently left every per-job storage directory behind here.
+plain `rm -rf` -- accounts on this cluster get no `/etc/subuid`/`/etc/subgid`
+range unless one is explicitly requested from HPC (see the "Podman Build"
+section's prerequisite note above), so without one, a plain `rm -rf` run as
+your real user hits `Permission denied` on every file inside an overlay
+diff layer -- confirmed live. This is a real difference from
+agentic-sandbox's own cluster setup, which requires a subuid range as a
+prerequisite for everyone; `podman unshare rm -rf` is expected to keep
+working correctly for an account that *has* requested a range too (it
+doesn't depend on there being no range), but that combination hasn't been
+verified live yet -- only the no-range case has.
 
 ### Read-only model
 

@@ -89,17 +89,21 @@ podman_storage_setup_job() {
 
 # podman_storage_cleanup -- retry-loop removal of a per-job storage dir.
 #
-# Uses `podman unshare rm -rf`, not a plain `rm -rf` -- confirmed live on
-# this host: this cluster has no /etc/subuid/subgid ranges (see
+# Uses `podman unshare rm -rf`, not a plain `rm -rf` -- confirmed live for
+# an account with no requested /etc/subuid/subgid range (the default on
+# this cluster; see README's "Podman Build" prerequisite note -- see also
 # _podman_storage_shared_setup's ignore_chown_errors=true and the
-# Containerfile's TAR_OPTIONS=--no-same-owner, both existing workarounds for
-# the same constraint), so overlay diff-layer files land owned by a fake UID
-# inside Podman's own single-mapping user namespace that only `podman
+# Containerfile's TAR_OPTIONS=--no-same-owner, both existing workarounds
+# for the same constraint): overlay diff-layer files land owned by a fake
+# UID inside Podman's own single-mapping user namespace that only `podman
 # unshare` can remove -- a real user's plain `rm -rf` hits "Permission
-# denied" on every file, every time, not just an occasional busy-mount race.
-# (agentic-sandbox's own cluster has real subuid ranges configured -- its
-# README lists that as a prerequisite -- so its plain `rm -rf` retry loop
-# didn't need this.)
+# denied" on every file, every time, not just an occasional busy-mount
+# race. (agentic-sandbox's own cluster requires a subuid range as a
+# prerequisite for every account -- its README lists that as a
+# prerequisite -- so its plain `rm -rf` retry loop didn't need this.
+# `podman unshare rm -rf` is expected to keep working for an account here
+# that has requested a range too, just not verified live yet for that
+# combination.)
 #
 # Retries for up to 30s in case the overlay unmount for a just-removed
 # (--rm) container isn't finished the instant `podman run` returns. Leaving

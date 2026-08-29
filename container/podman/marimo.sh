@@ -11,7 +11,9 @@
 # Janelia HPC notes:
 #   --cgroup-manager=cgroupfs  no systemd user session on compute nodes
 #   --events-backend=file      no dbus session available
-#   --userns=keep-id omitted   requires /etc/subuid entries absent on this host
+#   --userns=keep-id omitted   requires an /etc/subuid range; not requested by
+#                              default for any account on this cluster (see
+#                              README's "Podman Build" prerequisite note)
 #   Storage redirected to /scratch to avoid NFS xattr failures, with a
 #   per-job isolated --root/--runroot so concurrent Podman jobs from the
 #   same user on the same GPU node don't corrupt each other's storage
