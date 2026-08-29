@@ -40,9 +40,13 @@ container/caddy-lib.sh                shared Caddy/TLS-cert helpers used by http
 container/https-wrap.sh               fronts Marimo with Caddy TLS -- see "HTTPS (optional)" below
 container/terminal-wrap.sh            fronts a web terminal (ttyd) with Caddy TLS, an alternative
                                        to Marimo -- see "Web terminal" below
-runnables.yaml                        Fileglancer job manifest (marimo-https, marimo-podman-https,
-                                       terminal-https, terminal-podman-https -- HTTPS-only, see
-                                       "HTTPS (optional)" below)
+runnables.yaml                        Fileglancer app manifest: "Marimo AI Sandbox" (marimo-https,
+                                       marimo-podman-https -- HTTPS-only, see "HTTPS (optional)"
+                                       below)
+terminal/runnables.yaml               Separate Fileglancer app manifest: "Web Terminal AI Sandbox"
+                                       (terminal-https, terminal-podman-https -- see "Web terminal"
+                                       below for why this is a second manifest, not part of the one
+                                       above)
 work/                                 runtime writable dir (created on first run; git-ignored)
 ```
 
@@ -171,6 +175,20 @@ the image via `pixi.toml`) instead:
 pixi run terminal-https                    # serves https://<host>:<port>
 BACKEND=podman pixi run terminal-https     # force Podman
 ```
+
+**Fileglancer app**: the web terminal's runnables live in their own
+manifest, `terminal/runnables.yaml`, rather than the root `runnables.yaml`
+-- Fileglancer discovers every `runnables.yaml` in a repo and offers each
+as an independently addable app, so "Marimo AI Sandbox" and "Web Terminal
+AI Sandbox" show up as two separate app cards instead of one, even though
+both live in this same repo. Fileglancer always runs a job's commands from
+the **repo root**, regardless of which subdirectory the manifest itself
+lives in -- confirmed live (a job actually failed with `No such file or
+directory` when `terminal/runnables.yaml`'s `command:` field used
+`../container/terminal-wrap.sh`, assuming it would run from `terminal/`).
+So `terminal/runnables.yaml`'s `command:` fields use the same
+`container/terminal-wrap.sh` path as the root manifest's `https-wrap.sh`
+calls, not a `../`-relative one.
 
 Useful for driving the agent CLIs (`claude`, `codex`, `gemini`, `agy`) or a
 plain shell from a browser, with no separate SSH/terminal client needed --

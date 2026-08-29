@@ -1,28 +1,36 @@
-name: Marimo AI Sandbox
+name: Web Terminal AI Sandbox
 description: >-
-  Reactive Marimo notebook server bundled with AI coding-agent CLIs (Claude
-  Code, Codex, Gemini, Antigravity) inside a read-only Apptainer/Podman
-  sandbox; only a single work directory is writable.
+  Browser-based terminal (ttyd) inside the same read-only Apptainer/Podman
+  sandbox as the Marimo AI Sandbox app -- an alternative to Marimo for
+  driving the agent CLIs (Claude Code, Codex, Gemini CLI, Antigravity) or a
+  plain shell, with no separate SSH/terminal client needed. Split into its
+  own Fileglancer app (a second runnables.yaml manifest in the same repo)
+  so it can be added independently of the Marimo notebook server.
 requirements:
   - apptainer
   - pixi
 runnables:
-  - id: marimo-https
-    name: Start Marimo Server (Apptainer, HTTPS)
+  - id: terminal-https
+    name: Start Web Terminal (Apptainer, HTTPS)
     type: service
     working_dir: repo
     description: >-
-      Serves Marimo behind a local Caddy TLS-terminating reverse proxy.
-      Manual (non-auto_url) service: container/https-wrap.sh publishes the
-      launch URL itself once Caddy's HTTPS port is open, and prints a
-      self-signed cert path to trust on first run. Uses Apptainer if
-      available, else Podman -- see "marimo-podman-https" to force Podman.
-      See README.md's "HTTPS" section for details and troubleshooting.
+      Serves a web terminal (ttyd) inside the same read-only/writable-/work
+      sandbox as an interactive shell.sh session, behind a local Caddy
+      TLS-terminating reverse proxy. Manual (non-auto_url) service, same
+      publishing/cert model as the Marimo AI Sandbox app's marimo-https
+      runnable (see container/terminal-wrap.sh). Auth is HTTP Basic
+      (embedded in the launch URL), not a query-string token like Marimo's.
+      Uses Apptainer if available, else falls back to Podman -- see
+      "terminal-podman-https" to force Podman even when Apptainer is
+      present. NOT compatible with the network egress allowlist (see
+      README.md's "Sandbox strength" section) -- terminal-wrap.sh
+      hard-errors if --allow/$ALLOW_HOSTS is set.
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
       PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https
-      container/https-wrap.sh --port "$FG_SERVICE_PORT"
+      container/terminal-wrap.sh
     parameters:
       - flag: --ro-paths
         name: Read-only paths
@@ -50,23 +58,21 @@ runnables:
       memory: "8 GB"
       walltime: "08:00"
 
-  - id: marimo-podman-https
-    name: Start Marimo Server (Podman, HTTPS)
+  - id: terminal-podman-https
+    name: Start Web Terminal (Podman, HTTPS)
     type: service
     working_dir: repo
     description: >-
-      Same as "marimo-https" above, but forces the Podman backend
+      Same as "terminal-https" above, but forces the Podman backend
       (BACKEND=podman) -- Podman is **preferred by Janelia HPC admins** (see
       README.md's "GPU passthrough" and "Podman storage isolation"
-      sections). "marimo-https" itself always prefers Apptainer when it's
-      present on the host, with no flag/parameter of its own to override
-      that; this runnable exists specifically to force Podman+HTTPS in that
-      case.
+      sections). "terminal-https" always prefers Apptainer when present,
+      with no way to force Podman otherwise.
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
       PATH="$HOME/.pixi/bin:$PATH" BACKEND=podman pixi run --environment https
-      container/https-wrap.sh --port "$FG_SERVICE_PORT"
+      container/terminal-wrap.sh
     parameters:
       - flag: --ro-paths
         name: Read-only paths
@@ -93,4 +99,3 @@ runnables:
       cpus: 8
       memory: "8 GB"
       walltime: "08:00"
-
