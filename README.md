@@ -181,13 +181,14 @@ manifest, `terminal/runnables.yaml`, rather than the root `runnables.yaml`
 -- Fileglancer discovers every `runnables.yaml` in a repo and offers each
 as an independently addable app, so "Marimo AI Sandbox" and "Web Terminal
 AI Sandbox" show up as two separate app cards instead of one, even though
-both live in this same repo. This means script paths in
-`terminal/runnables.yaml`'s `command:` fields are one level up
-(`../container/terminal-wrap.sh`, not `container/terminal-wrap.sh`) --
-Fileglancer runs a job from the directory containing whichever manifest
-it came from, not always the repo root, and `pixi run <path>` (unlike a
-declared pixi *task* name) resolves a relative path against that same
-directory, not the workspace root.
+both live in this same repo. Fileglancer always runs a job's commands from
+the **repo root**, regardless of which subdirectory the manifest itself
+lives in -- confirmed live (a job actually failed with `No such file or
+directory` when `terminal/runnables.yaml`'s `command:` field used
+`../container/terminal-wrap.sh`, assuming it would run from `terminal/`).
+So `terminal/runnables.yaml`'s `command:` fields use the same
+`container/terminal-wrap.sh` path as the root manifest's `https-wrap.sh`
+calls, not a `../`-relative one.
 
 Useful for driving the agent CLIs (`claude`, `codex`, `gemini`, `agy`) or a
 plain shell from a browser, with no separate SSH/terminal client needed --

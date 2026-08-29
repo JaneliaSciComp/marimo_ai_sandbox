@@ -30,7 +30,7 @@ runnables:
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
       PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https
-      ../container/terminal-wrap.sh
+      container/terminal-wrap.sh
     parameters:
       - flag: --ro-paths
         name: Read-only paths
@@ -72,7 +72,7 @@ runnables:
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
       PATH="$HOME/.pixi/bin:$PATH" BACKEND=podman pixi run --environment https
-      ../container/terminal-wrap.sh
+      container/terminal-wrap.sh
     parameters:
       - flag: --ro-paths
         name: Read-only paths
