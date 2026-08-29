@@ -20,6 +20,9 @@
 # var and conf/config.toml; consumed here, remaining args are left in "$@"
 # for the caller to forward on):
 #   --ro-paths PATHS   or   --ro-paths=PATHS   (space-separated, same format as RO_PATHS)
+#   --ro-path-1 PATH   or   --ro-path-1=PATH   (single-directory slots, for
+#   --ro-path-2 PATH   or   --ro-path-2=PATH   Fileglancer's directory picker
+#   --ro-path-3 PATH   or   --ro-path-3=PATH   -- see below)
 #   --work PATH        or   --work=PATH
 #   --port PORT        or   --port=PORT
 #   --enable-bsub                              (no value; same as ENABLE_BSUB=1)
@@ -47,6 +50,15 @@ while [[ $# -gt 0 ]]; do
         --ro-paths=*)
             _val="${1#--ro-paths=}"
             [[ -n "$_val" ]] && RO_PATHS="$_val"
+            shift
+            ;;
+        --ro-path-[0-9])
+            [[ -n "${2:-}" ]] && _RO_PATH_SLOTS="${_RO_PATH_SLOTS:-}${_RO_PATH_SLOTS:+ }$2"
+            shift 2
+            ;;
+        --ro-path-[0-9]=*)
+            _val="${1#--ro-path-*=}"
+            [[ -n "$_val" ]] && _RO_PATH_SLOTS="${_RO_PATH_SLOTS:-}${_RO_PATH_SLOTS:+ }$_val"
             shift
             ;;
         --work)
@@ -126,6 +138,16 @@ print(' '.join(d.get('ro_paths', [])))
     unset _toml_all _toml_work _toml_port _toml_ro
 fi
 unset _CONFIG _APP_MANIFEST
+
+# --ro-path-1/2/3 (Fileglancer's directory-picker slots) are always additive
+# on top of RO_PATHS, however RO_PATHS itself got set (env var,
+# conf/config.toml, or --ro-paths) -- not order-dependent on where the flags
+# land on the command line, unlike the plain overwrite-if-given precedence
+# used for --ro-paths/--work/--port above.
+if [[ -n "${_RO_PATH_SLOTS:-}" ]]; then
+    RO_PATHS="${RO_PATHS:-}${RO_PATHS:+ }$_RO_PATH_SLOTS"
+fi
+unset _RO_PATH_SLOTS
 
 WORK="${WORK:-$_PROJECT_ROOT/work}"
 PORT="${PORT:-8080}"
