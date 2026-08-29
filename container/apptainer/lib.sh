@@ -66,3 +66,53 @@ apptainer_network_setup() {
 apptainer_network_cleanup() {
     network_allowlist_proxy_cleanup
 }
+
+# apptainer_resolve_image -- resolves $SIF to something runnable, shared by
+# marimo.sh and shell.sh. Mirrors ../podman/lib.sh's podman_resolve_image.
+#
+# Unless the caller explicitly pointed $SIF at something (e.g. `SIF=foo.sif
+# ./marimo.sh`), this checks the registry for updates on EVERY invocation
+# via `apptainer pull` (apptainer reuses its own OCI blob cache for
+# unchanged layers, so an unchanged check is far cheaper than it looks --
+# "Using cached SIF image", not a full re-download) rather than the old
+# "only pull if the file doesn't exist at all" check, which -- confirmed
+# live for the identical Podman bug this mirrors -- would silently reuse a
+# local .sif cached from before a pixi.toml dependency change forever,
+# since nothing ever re-validated it once it existed once.
+#
+# Usage: apptainer_resolve_image REMOTE_IMAGE SIF_WAS_EXPLICIT
+#   REMOTE_IMAGE     the docker://... reference to check/pull
+#   SIF_WAS_EXPLICIT "1" if the caller's $SIF was set by the user (env var
+#                    or otherwise) rather than defaulted -- skips the
+#                    registry entirely in that case, building only if that
+#                    exact file is missing (the existing "SIF=foo.sif ...
+#                    to skip the registry" escape hatch, preserved as-is)
+#
+# Requires the caller to already have a `_set_phase` function defined and
+# its own $SIF variable set -- reads/writes $SIF directly.
+apptainer_resolve_image() {
+    local remote="$1" explicit="$2"
+
+    if [[ "$explicit" == "1" ]]; then
+        [[ -f "$SIF" ]] || bash ./build.sh
+        return 0
+    fi
+
+    echo ">> Checking '$remote' for updates ..."
+    _set_phase pulling_image
+    local tmp_sif="${SIF}.tmp.$$"
+    trap 'rm -f "$tmp_sif"' EXIT
+    if apptainer pull "$tmp_sif" "$remote"; then
+        mv "$tmp_sif" "$SIF"
+        trap - EXIT
+    else
+        rm -f "$tmp_sif"
+        trap - EXIT
+        if [[ -f "$SIF" ]]; then
+            echo ">> Pull failed (offline/registry unreachable?) -- reusing existing local '$SIF'." >&2
+        else
+            echo ">> Pull failed and no local '$SIF' exists -- building from source instead ..." >&2
+            bash ./build.sh
+        fi
+    fi
+}

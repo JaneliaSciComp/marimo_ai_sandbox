@@ -55,6 +55,9 @@ trap 'echo ">> https-wrap: FATAL: \"$BASH_COMMAND\" failed (exit $?) at line $LI
 
 cd "$(dirname "$0")/.."   # project root
 
+# shellcheck source=container/caddy-lib.sh
+source "container/caddy-lib.sh"
+
 # Reports coarse startup progress to Fileglancer's phase file (set only when
 # this runs as a Fileglancer service job), which its UI reads to explain a
 # wait before the service URL appears. Only "pulling_image" and "starting"
@@ -64,27 +67,6 @@ cd "$(dirname "$0")/.."   # project root
 _set_phase() {
     [[ -n "${FG_PHASE_PATH:-}" ]] && printf '%s' "$1" > "$FG_PHASE_PATH" 2>/dev/null
     return 0
-}
-
-# Finds a free TCP port the same way Fileglancer's own job runner does
-# (bind-to-0 via python, falling back to probing the ephemeral range), since
-# we can't assume the caller-supplied --https-port (if any) or a fixed
-# default like 8443 is actually free on this host.
-__free_port() {
-    local p py i
-    for py in python3 python; do
-        if command -v "$py" >/dev/null 2>&1; then
-            p="$("$py" -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()' 2>/dev/null)" || true
-            [[ -n "$p" ]] && { printf '%s' "$p"; return 0; }
-        fi
-    done
-    for i in $(seq 1 50); do
-        p=$(( (RANDOM % 16384) + 49152 ))
-        if ! (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
-            printf '%s' "$p"; return 0
-        fi
-    done
-    printf '%s' 8443
 }
 
 HTTPS_PORT=""
@@ -108,7 +90,7 @@ while [[ $# -gt 0 ]]; do
 done
 set -- "${_args[@]}"
 unset _args _val
-[[ -z "$HTTPS_PORT" ]] && HTTPS_PORT="$(__free_port)"
+[[ -z "$HTTPS_PORT" ]] && HTTPS_PORT="$(caddy_free_port)"
 
 # --allow/$ALLOW_HOSTS (the network egress allowlist, both backends -- see
 # container/common.sh's network_allowlist_* and container/{podman,apptainer}
@@ -175,7 +157,10 @@ elif [[ -f "$WORK_VAL/.marimo-token" ]]; then
 else
     mkdir -p "$WORK_VAL"
     TOKEN="$(openssl rand -hex 16)"
-    printf '%s' "$TOKEN" > "$WORK_VAL/.marimo-token"
+    # Create with restrictive permissions from the start (umask in a
+    # subshell, not a chmod afterward) -- see terminal-wrap.sh's identical
+    # fix for .terminal-token for the full reasoning.
+    (umask 077 && printf '%s' "$TOKEN" > "$WORK_VAL/.marimo-token")
 fi
 
 # Pick the backend to run Marimo through. Default (BACKEND unset): the same
@@ -261,41 +246,11 @@ _set_phase starting
 # subsequent runs so the cert doesn't have to be re-trusted in the browser
 # every time. Stored in the work directory alongside other job artifacts.
 CERT_DIR="${FG_WORK_DIR:-$WORK_VAL}/https-cert"
-CERT_FILE="$CERT_DIR/marimo-https.crt"
-KEY_FILE="$CERT_DIR/marimo-https.key"
-HOST_NAME="$(hostname -f 2>/dev/null || hostname)"
-
-if [[ ! -f "$CERT_FILE" || ! -f "$KEY_FILE" ]] || ! openssl x509 -in "$CERT_FILE" -noout -checkhost "$HOST_NAME" >/dev/null 2>&1; then
-    mkdir -p "$CERT_DIR"
-    SAN="DNS:${HOST_NAME},DNS:$(hostname),DNS:localhost,IP:127.0.0.1"
-    for _ip in $(hostname -I 2>/dev/null); do
-        SAN="${SAN},IP:${_ip}"
-    done
-    echo ">> Generating self-signed HTTPS cert for ${HOST_NAME} (10-year validity)"
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
-        -keyout "$KEY_FILE" -out "$CERT_FILE" -days 3650 \
-        -subj "/CN=${HOST_NAME}" -addext "subjectAltName=${SAN}"
-else
-    echo ">> Reusing existing HTTPS cert for ${HOST_NAME} ($CERT_FILE)"
-fi
+caddy_generate_cert "$CERT_DIR" marimo-https
 
 echo ">> HTTPS proxy: https://${HOST_NAME}:${HTTPS_PORT}?access_token=${TOKEN} -> 127.0.0.1:${INTERNAL_PORT}"
 echo ">> Cert: $CERT_FILE -- install it in your browser's trust store to avoid the untrusted-certificate warning."
-echo ">> Starting Caddy on :${HTTPS_PORT} ..."
-CADDYFILE="$(mktemp)"
-cat > "$CADDYFILE" <<EOF
-{
-    admin off
-    auto_https off
-}
-
-:${HTTPS_PORT} {
-    tls ${CERT_FILE} ${KEY_FILE}
-    reverse_proxy 127.0.0.1:${INTERNAL_PORT}
-}
-EOF
-caddy run --config "$CADDYFILE" --adapter caddyfile &
-CADDY_PID=$!
+caddy_start "$HTTPS_PORT" "$INTERNAL_PORT"
 
 # Publish the service URL ourselves (Fileglancer's auto_url always writes
 # http://$FG_HOSTNAME:$FG_SERVICE_PORT, which here would be Marimo's own
@@ -303,30 +258,8 @@ CADDY_PID=$!
 # connections on HTTPS_PORT. $TOKEN is already known up front now (resolved
 # before Marimo even started), so unlike before, there's nothing left to
 # wait on besides the port itself.
-if [[ -n "${SERVICE_URL_PATH:-}" ]]; then
-    (
-        for _ in $(seq 1 1800); do
-            if ! kill -0 "$MARIMO_PID" 2>/dev/null; then
-                echo "https-wrap: Marimo process died before HTTPS port opened; service URL not published." >&2
-                exit 1
-            fi
-            if ! kill -0 "$CADDY_PID" 2>/dev/null; then
-                echo "https-wrap: Caddy process died before HTTPS port opened; service URL not published." >&2
-                exit 1
-            fi
-            if (exec 3<>"/dev/tcp/127.0.0.1/$HTTPS_PORT") 2>/dev/null; then
-                printf 'https://%s:%s/?access_token=%s' "${FG_HOSTNAME:-$HOST_NAME}" "$HTTPS_PORT" "$TOKEN" > "$SERVICE_URL_PATH"
-                echo ">> Published service URL to $SERVICE_URL_PATH"
-                exit 0
-            fi
-            sleep 1
-        done
-        echo "https-wrap: port $HTTPS_PORT never opened; service URL not published." >&2
-    ) &
-    PUBLISHER_PID=$!
-else
-    echo ">> WARNING: \$SERVICE_URL_PATH is not set -- the service URL cannot be published to Fileglancer, so no launch link will ever appear for this job." >&2
-fi
+caddy_publish_service_url "$HTTPS_PORT" "$MARIMO_PID" \
+    "https://${FG_HOSTNAME:-$HOST_NAME}:${HTTPS_PORT}/?access_token=${TOKEN}"
 
 wait "$CADDY_PID"
 wait "${PUBLISHER_PID:-}" 2>/dev/null || true

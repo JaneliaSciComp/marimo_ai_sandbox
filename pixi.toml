@@ -16,6 +16,7 @@ git = ">=2.55.0,<3"
 jq = ">=1.8.2,<2"          # JSON wrangling on the command line / in notebooks
 vim = ">=9.2.785,<10"         # editors available inside the sandbox
 nano = ">=9.2,<10"
+ttyd = ">=1.7.7,<2"          # web terminal server for the terminal-https runnable (see container/terminal-wrap.sh)
 
 [tasks]
 # --- Apptainer ---------------------------------------------------------------
@@ -79,6 +80,19 @@ args = [
   { arg = "ro_paths", default = "" },
   { arg = "work", default = "" },
   { arg = "port", default = "" },
+  { arg = "https_port", default = "" },
+]
+
+# Same shape as marimo-https above, but fronts a web terminal (ttyd, run
+# inside the sandbox via shell-apptainer/shell-podman) instead of Marimo --
+# see container/terminal-wrap.sh. No "port" arg: ttyd's internal port is
+# always auto-selected (nothing else needs to know it, unlike Marimo's,
+# which this repo's other tasks/runnables also expose directly over HTTP).
+[feature.https.tasks.terminal-https]
+cmd = "container/terminal-wrap.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\" --https-port \"{{ https_port }}\""
+args = [
+  { arg = "ro_paths", default = "" },
+  { arg = "work", default = "" },
   { arg = "https_port", default = "" },
 ]
 

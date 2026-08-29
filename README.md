@@ -35,8 +35,14 @@ container/allowlist_proxy.py / relay.py   the network allowlist mechanism itself
 container/bsub-wrapper/bin/bsub       opt-in bsub wrapper -- see "Submitting LSF jobs" below
 container/app/AGENTS.md               seeded into /work; CLAUDE.md/GEMINI.md symlink to it
 container/app/agents_demo.py          starter Marimo notebook that calls an agent via subprocess
-runnables.yaml                        Fileglancer job manifest (marimo-https, marimo-podman-https --
-                                       HTTPS-only, see "HTTPS (optional)" below)
+container/caddy-lib.sh                shared Caddy/TLS-cert helpers used by https-wrap.sh and
+                                       terminal-wrap.sh
+container/https-wrap.sh               fronts Marimo with Caddy TLS -- see "HTTPS (optional)" below
+container/terminal-wrap.sh            fronts a web terminal (ttyd) with Caddy TLS, an alternative
+                                       to Marimo -- see "Web terminal" below
+runnables.yaml                        Fileglancer job manifest (marimo-https, marimo-podman-https,
+                                       terminal-https, terminal-podman-https -- HTTPS-only, see
+                                       "HTTPS (optional)" below)
 work/                                 runtime writable dir (created on first run; git-ignored)
 ```
 
@@ -132,11 +138,11 @@ backend preferred by HPC admins (see "GPU passthrough" and "Podman storage
 isolation" above) but the plain `marimo-https` runnable would otherwise
 always prefer Apptainer when present.
 
-`runnables.yaml` only exposes the two HTTPS runnables (`marimo-https`,
-`marimo-podman-https`) -- the plain-HTTP `pixi run marimo-apptainer`/
-`marimo-podman` commands above still work directly, just aren't offered as
-Fileglancer jobs, since an HTTP job would carry Marimo's access token in
-the URL unencrypted.
+`runnables.yaml` only exposes HTTPS runnables (`marimo-https`,
+`marimo-podman-https`, and the web-terminal ones below) -- the plain-HTTP
+`pixi run marimo-apptainer`/`marimo-podman` commands above still work
+directly, just aren't offered as Fileglancer jobs, since an HTTP job would
+carry Marimo's access token in the URL unencrypted.
 
 Caddy terminates TLS using a self-signed certificate that the wrapper script
 generates itself (via `openssl`) and hands to Caddy as a static cert file,
@@ -152,6 +158,53 @@ Security → Manage certificates → Authorities → Import; Firefox: Settings �
 Privacy & Security → Certificates → View Certificates → Authorities →
 Import). This is entirely self-contained — it doesn't depend on Fileglancer
 to obtain a cert.
+
+### Web terminal (optional, alternative to Marimo)
+
+`pixi run terminal-https` serves a web-based terminal instead of Marimo --
+same sandbox (read-only host, writable `/work`, GPU passthrough), same
+Caddy TLS-terminating setup as `marimo-https` above, just fronting
+[ttyd](https://github.com/tsl0922/ttyd) (a conda-forge package, baked into
+the image via `pixi.toml`) instead:
+
+```bash
+pixi run terminal-https                    # serves https://<host>:<port>
+BACKEND=podman pixi run terminal-https     # force Podman
+```
+
+Useful for driving the agent CLIs (`claude`, `codex`, `gemini`, `agy`) or a
+plain shell from a browser, with no separate SSH/terminal client needed --
+e.g. from a Fileglancer job with no other terminal access. Under the hood,
+`container/terminal-wrap.sh` runs `ttyd` *inside* the sandbox via
+`shell.sh`'s command-override support (`./shell.sh -- ttyd ...`, added
+alongside this feature) rather than a separate code path, so it gets the
+exact same `--ro-paths`/`--work`/GPU handling an interactive `shell.sh`
+session does. `shell.sh` now pulls the pre-built image from `ghcr.io`
+first, same as `marimo.sh` always has, falling back to a local build only
+if the pull fails -- it used to always build locally from scratch, so the
+first-ever `terminal-https`/`shell-*` invocation on a given node paid a
+multi-minute cold build. Confirmed live: this was the actual root cause of
+a real Fileglancer `terminal-https` job showing a confusing `502` for
+several minutes (Caddy only waits 30s for `ttyd` before starting anyway --
+see the `--allow` `502` note below for the identical Caddy-vs-backend-
+timing shape).
+
+Auth is ttyd's own HTTP Basic Auth (`-c user:pass`), not a query-string
+token like Marimo's -- the launch URL embeds the credential directly
+(`https://terminal:<token>@host:port/`), which browsers use to
+auto-authenticate the same way. The token is resolved the same way
+Marimo's is (`$FG_SERVICE_TOKEN` if this is a Fileglancer job, else a
+random token persisted at `$WORK/.terminal-token`), kept in its own file so
+the two services don't share a credential even against the same `--work`.
+
+**Not compatible with `--allow`/`$ALLOW_HOSTS`** (see "Sandbox strength"
+below) -- same reason `marimo-https` isn't: the egress allowlist isolates
+the container's network namespace, including its own loopback, so Caddy
+(running outside the container, on the host) can no longer reach it.
+`terminal-wrap.sh` hard-errors immediately if it's set, same as
+`https-wrap.sh`. Use `pixi run shell-apptainer`/`shell-podman -- ttyd ...`
+directly with `--allow` instead if you need both at once (no HTTPS
+fronting in that case, so it isn't a Fileglancer-servable job).
 
 ### GPU passthrough (automatic)
 

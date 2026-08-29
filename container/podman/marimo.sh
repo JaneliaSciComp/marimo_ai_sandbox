@@ -19,14 +19,21 @@
 #   same user on the same GPU node don't corrupt each other's storage
 #   (see lib.sh's podman_storage_setup_job).
 #
-# Image source: by default this pulls the image published by
-# .github/workflows/publish-image.yml (ghcr.io/janeliascicomp/marimo_ai_sandbox)
-# instead of building from source. If the pull fails (offline compute node,
-# registry unreachable) and no local copy exists yet, it falls back to
-# building marimo_sandbox:latest locally via build.sh, same as before this
-# registry image existed. Set IMAGE to any other reference to pull that
-# instead, or to a purely local tag (e.g. marimo_sandbox:latest) to skip the
-# registry and always build locally on first use.
+# Image source: by default this checks the registry for updates to the
+# image published by .github/workflows/publish-image.yml
+# (ghcr.io/janeliascicomp/marimo_ai_sandbox) on EVERY run -- a cheap
+# manifest-digest check, not a re-download, unless the image actually
+# changed -- instead of building from source. If the pull fails (offline
+# compute node, registry unreachable), it reuses whatever's already cached
+# locally if anything is, and only builds marimo_sandbox:latest locally
+# via build.sh as a last resort (no cache, no registry reachable). Always
+# checking, rather than only pulling the first time, avoids silently
+# reusing a stale image forever once one happens to be cached (confirmed
+# live: a locally-cached image from before a pixi.toml dependency change
+# went undetected until this fix). Set IMAGE to any other reference to
+# pull that instead, or to a purely local tag (e.g. marimo_sandbox:latest)
+# to skip the registry entirely and always build locally on first use --
+# an explicit override like this is trusted as-is, never re-checked.
 #
 # Usage:
 #   ./marimo.sh                                  # serve Marimo on :8080
@@ -52,6 +59,7 @@ _CALLER_PWD="$PWD"
 
 cd "$(dirname "$0")"
 
+_IMAGE_EXPLICIT=0; [[ -n "${IMAGE:-}" ]] && _IMAGE_EXPLICIT=1
 IMAGE="${IMAGE:-ghcr.io/janeliascicomp/marimo_ai_sandbox:latest}"
 LOCAL_IMAGE="marimo_sandbox:latest"
 
@@ -78,15 +86,8 @@ _set_phase() {
     return 0
 }
 
-if ! podman image exists "$IMAGE" &>/dev/null; then
-    echo ">> Image '$IMAGE' not found locally -- pulling from registry ..."
-    _set_phase pulling_image
-    if ! podman pull "$IMAGE"; then
-        echo ">> Pull failed -- building '$LOCAL_IMAGE' from source instead ..." >&2
-        IMAGE="$LOCAL_IMAGE"
-        podman image exists "$IMAGE" &>/dev/null || bash ./build.sh
-    fi
-fi
+podman_resolve_image "$IMAGE" "$LOCAL_IMAGE" "$_IMAGE_EXPLICIT"
+IMAGE="$RESOLVED_IMAGE"
 
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(-v "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(-e "$e"); done

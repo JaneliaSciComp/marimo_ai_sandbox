@@ -238,3 +238,51 @@ podman_network_setup() {
 podman_network_cleanup() {
     network_allowlist_proxy_cleanup
 }
+
+# podman_resolve_image -- resolves $IMAGE to something runnable, shared by
+# marimo.sh and shell.sh.
+#
+# Unless the caller explicitly set $IMAGE (env var or otherwise), this
+# checks the registry for updates on EVERY invocation via `podman pull`
+# (cheap -- a manifest-digest check, not a re-download, unless the image
+# actually changed) rather than the old "only pull if nothing is cached at
+# all" check, which -- confirmed live -- silently reused a local image
+# cached from before a pixi.toml dependency change (ttyd) forever, since
+# nothing ever re-validated it once it existed once.
+#
+# Usage: podman_resolve_image REMOTE_IMAGE LOCAL_IMAGE IMAGE_WAS_EXPLICIT
+#   REMOTE_IMAGE       the ghcr.io reference to check/pull
+#   LOCAL_IMAGE        the local-build fallback tag
+#   IMAGE_WAS_EXPLICIT "1" if the caller's $IMAGE was set by the user
+#                      (env var or --image-style override) rather than
+#                      defaulted -- skips the registry entirely in that
+#                      case, building only if that exact image is missing
+#                      (the existing "IMAGE=marimo_sandbox:latest ...to
+#                      skip the registry" escape hatch, preserved as-is)
+#
+# Requires the caller to already have a `_set_phase` function defined
+# (both marimo.sh and shell.sh do) -- reports "pulling_image" through it
+# the same way the caller's other phases are reported.
+#
+# Sets: RESOLVED_IMAGE -- the image reference the caller should actually run
+podman_resolve_image() {
+    local remote="$1" local_image="$2" explicit="$3"
+    RESOLVED_IMAGE="$remote"
+
+    if [[ "$explicit" == "1" ]]; then
+        podman image exists "$RESOLVED_IMAGE" &>/dev/null || bash ./build.sh
+        return 0
+    fi
+
+    echo ">> Checking '$RESOLVED_IMAGE' for updates ..."
+    _set_phase pulling_image
+    if ! podman pull "$RESOLVED_IMAGE"; then
+        if podman image exists "$RESOLVED_IMAGE" &>/dev/null; then
+            echo ">> Pull failed (offline/registry unreachable?) -- reusing existing cached '$RESOLVED_IMAGE'." >&2
+        else
+            echo ">> Pull failed and no local copy exists -- building '$local_image' from source instead ..." >&2
+            RESOLVED_IMAGE="$local_image"
+            podman image exists "$RESOLVED_IMAGE" &>/dev/null || bash ./build.sh
+        fi
+    fi
+}
