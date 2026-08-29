@@ -28,6 +28,7 @@ _CALLER_PWD="$PWD"
 
 cd "$(dirname "$0")"
 
+_SIF_EXPLICIT=0; [[ -n "${SIF:-}" ]] && _SIF_EXPLICIT=1
 SIF="${SIF:-marimo_sandbox.sif}"
 REMOTE_IMAGE="${REMOTE_IMAGE:-docker://ghcr.io/janeliascicomp/marimo_ai_sandbox:latest}"
 
@@ -39,32 +40,6 @@ _set_phase() {
     return 0
 }
 
-# Same pull-then-build-fallback marimo.sh already uses, not just a bare
-# local build -- without this, every FIRST-EVER shell.sh invocation on a
-# given node (e.g. the first terminal-https job to land there) pays a
-# multi-minute from-scratch build (apt-get, pixi install, 5 npm installs,
-# the Antigravity CLI download, then SIF creation) instead of a fast
-# registry pull. Confirmed live: this was the root cause of a real
-# Fileglancer terminal-https job showing a confusing 502 for several
-# minutes -- terminal-wrap.sh's Caddy only waits 30s for the backend
-# before starting anyway, so a multi-minute cold build meant several
-# minutes of 502s that a fast pull would have avoided entirely.
-if [[ ! -f "$SIF" ]]; then
-    echo ">> Image '$SIF' not found -- pulling from registry ..."
-    _set_phase pulling_image
-    TMP_SIF="${SIF}.tmp.$$"
-    trap 'rm -f "$TMP_SIF"' EXIT
-    if apptainer pull "$TMP_SIF" "$REMOTE_IMAGE"; then
-        mv "$TMP_SIF" "$SIF"
-        trap - EXIT
-    else
-        rm -f "$TMP_SIF"
-        trap - EXIT
-        echo ">> Pull failed -- building '$SIF' from source instead ..." >&2
-        bash ./build.sh
-    fi
-fi
-
 # shellcheck source=common.sh
 source "../common.sh"
 # shellcheck source=lib.sh
@@ -75,6 +50,23 @@ source "./lib.sh"
 # for THIS script (see usage above) is naturally written with one
 # (`./shell.sh -- ttyd ...`), so strip a single leading "--" here instead.
 [[ "${1:-}" == "--" ]] && shift
+
+# Same pull-then-build-fallback marimo.sh already uses (see lib.sh's
+# apptainer_resolve_image), not just a bare local build -- without this,
+# every FIRST-EVER shell.sh invocation on a given node (e.g. the first
+# terminal-https job to land there) pays a multi-minute from-scratch build
+# (apt-get, pixi install, 5 npm installs, the Antigravity CLI download,
+# then SIF creation) instead of a fast registry pull. Confirmed live: this
+# was the root cause of a real Fileglancer terminal-https job showing a
+# confusing 502 for several minutes -- terminal-wrap.sh's Caddy only waits
+# 30s for the backend before starting anyway, so a multi-minute cold build
+# meant several minutes of 502s that a fast pull would have avoided
+# entirely. Also re-checks the registry on every run (not just when
+# nothing is cached yet) -- confirmed live for the identical Podman bug
+# this mirrors: a stale .sif cached from before ttyd was added to
+# pixi.toml was otherwise reused forever, since the old check never
+# re-validated a cache hit.
+apptainer_resolve_image "$REMOTE_IMAGE" "$_SIF_EXPLICIT"
 
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(--bind "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(--env "$e"); done

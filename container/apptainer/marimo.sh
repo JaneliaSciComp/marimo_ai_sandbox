@@ -46,15 +46,22 @@
 # `resources:` block in runnables.yaml (cpus/memory/walltime) is the real
 # resource control today, enforced by LSF at the job level instead.
 #
-# Image source: by default this pulls (and converts) the OCI image published
-# by .github/workflows/publish-image.yml
-# (ghcr.io/janeliascicomp/marimo_ai_sandbox) into a local .sif, instead of
-# building from source with `apptainer build --fakeroot` (slow -- no layer
-# cache, reinstalls pixi/npm/Antigravity from scratch every time). If the
-# pull fails (offline compute node, registry unreachable) and no local .sif
-# exists yet, it falls back to building marimo_sandbox.sif locally via
-# build.sh. Set SIF to point at an existing local .sif to skip the registry
-# entirely.
+# Image source: by default this checks the registry for updates to the OCI
+# image published by .github/workflows/publish-image.yml
+# (ghcr.io/janeliascicomp/marimo_ai_sandbox) on EVERY run, converting it
+# into a local .sif -- apptainer reuses its own OCI blob cache for
+# unchanged layers, so an unchanged check is far cheaper than a full
+# `apptainer build --fakeroot` from source (which reinstalls pixi/npm/
+# Antigravity from scratch every time). If the pull fails (offline compute
+# node, registry unreachable), it reuses whatever .sif is already cached
+# locally if any is, and only builds marimo_sandbox.sif locally via
+# build.sh as a last resort. Always checking, rather than only pulling the
+# first time, avoids silently reusing a stale .sif forever once one
+# happens to be cached (confirmed live: a locally-cached .sif from before
+# a pixi.toml dependency change went undetected until this fix). Set SIF
+# to point at an existing local .sif to skip the registry entirely and
+# always build locally on first use -- an explicit override like this is
+# trusted as-is, never re-checked.
 #
 # Usage:
 #   ./marimo.sh                                  # serve Marimo on :8080
@@ -74,6 +81,7 @@ _CALLER_PWD="$PWD"
 
 cd "$(dirname "$0")"
 
+_SIF_EXPLICIT=0; [[ -n "${SIF:-}" ]] && _SIF_EXPLICIT=1
 SIF="${SIF:-marimo_sandbox.sif}"
 REMOTE_IMAGE="${REMOTE_IMAGE:-docker://ghcr.io/janeliascicomp/marimo_ai_sandbox:latest}"
 
@@ -86,26 +94,12 @@ _set_phase() {
     return 0
 }
 
-if [[ ! -f "$SIF" ]]; then
-    echo ">> Image '$SIF' not found -- pulling from registry ..."
-    _set_phase pulling_image
-    TMP_SIF="${SIF}.tmp.$$"
-    trap 'rm -f "$TMP_SIF"' EXIT
-    if apptainer pull "$TMP_SIF" "$REMOTE_IMAGE"; then
-        mv "$TMP_SIF" "$SIF"
-        trap - EXIT
-    else
-        rm -f "$TMP_SIF"
-        trap - EXIT
-        echo ">> Pull failed -- building '$SIF' from source instead ..." >&2
-        bash ./build.sh
-    fi
-fi
-
 # shellcheck source=common.sh
 source "../common.sh"
 # shellcheck source=lib.sh
 source "./lib.sh"
+
+apptainer_resolve_image "$REMOTE_IMAGE" "$_SIF_EXPLICIT"
 
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(--bind "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(--env "$e"); done

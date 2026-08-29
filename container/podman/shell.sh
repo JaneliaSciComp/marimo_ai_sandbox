@@ -29,6 +29,7 @@ _CALLER_PWD="$PWD"
 
 cd "$(dirname "$0")"
 
+_IMAGE_EXPLICIT=0; [[ -n "${IMAGE:-}" ]] && _IMAGE_EXPLICIT=1
 IMAGE="${IMAGE:-ghcr.io/janeliascicomp/marimo_ai_sandbox:latest}"
 LOCAL_IMAGE="marimo_sandbox:latest"
 
@@ -60,25 +61,23 @@ _set_phase() {
     return 0
 }
 
-# Same pull-then-build-fallback marimo.sh already uses, not just a bare
-# local build -- without this, every FIRST-EVER shell.sh invocation on a
-# given node (e.g. the first terminal-podman-https job to land there) pays
-# a multi-minute from-scratch build (apt-get, pixi install, 5 npm installs,
-# the Antigravity CLI download) instead of a fast registry pull. Confirmed
+# Same pull-then-build-fallback marimo.sh already uses (see lib.sh's
+# podman_resolve_image), not just a bare local build -- without this,
+# every FIRST-EVER shell.sh invocation on a given node (e.g. the first
+# terminal-podman-https job to land there) pays a multi-minute
+# from-scratch build (apt-get, pixi install, 5 npm installs, the
+# Antigravity CLI download) instead of a fast registry pull. Confirmed
 # live: an equivalent Apptainer cold-build was the root cause of a real
 # Fileglancer terminal-https job showing a confusing 502 for several
 # minutes -- terminal-wrap.sh's Caddy only waits 30s for the backend
 # before starting anyway, so a multi-minute cold build meant several
-# minutes of 502s that a fast pull would have avoided entirely.
-if ! podman image exists "$IMAGE" &>/dev/null; then
-    echo ">> Image '$IMAGE' not found locally -- pulling from registry ..."
-    _set_phase pulling_image
-    if ! podman pull "$IMAGE"; then
-        echo ">> Pull failed -- building '$LOCAL_IMAGE' from source instead ..." >&2
-        IMAGE="$LOCAL_IMAGE"
-        podman image exists "$IMAGE" &>/dev/null || bash ./build.sh
-    fi
-fi
+# minutes of 502s that a fast pull would have avoided entirely. Also
+# re-checks the registry on every run (not just when nothing is cached
+# yet) -- confirmed live: a stale image cached from before ttyd was added
+# to pixi.toml was otherwise reused forever, since the old check never
+# re-validated a cache hit.
+podman_resolve_image "$IMAGE" "$LOCAL_IMAGE" "$_IMAGE_EXPLICIT"
+IMAGE="$RESOLVED_IMAGE"
 
 BIND_ARGS=(); for p in "${BIND_PAIRS[@]}"; do BIND_ARGS+=(-v "$p"); done
 ENV_ARGS=();  for e in "${ENV_PAIRS[@]}"; do  ENV_ARGS+=(-e "$e"); done
