@@ -79,8 +79,7 @@ runnables:
           Public TLS port Caddy listens on. Defaults to an arbitrary free
           port chosen automatically at start.
     resources:
-      cpus: 8
-      memory: "8 GB"
+      cpus: 2
       walltime: "08:00"
 
   - id: terminal-podman-https
@@ -146,6 +145,5 @@ runnables:
           Public TLS port Caddy listens on. Defaults to an arbitrary free
           port chosen automatically at start.
     resources:
-      cpus: 8
-      memory: "8 GB"
+      cpus: 2
       walltime: "08:00"
