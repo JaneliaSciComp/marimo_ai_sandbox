@@ -93,11 +93,23 @@ A range-enabled account isn't required for anything in this repo to work
 `TAR_OPTIONS=--no-same-owner`, `podman unshare rm -rf` instead of a plain
 `rm -rf`) is a fallback for the no-range case, expected to remain harmless
 for an account that *has* a range too (not yet verified live either way
-for that combination). This repo doesn't currently take advantage of a
-range being present, e.g. to run containers as your real UID via
-`--userns=keep-id` instead of root (see the "Identity" bullet below) --
-that's a real possible follow-up now that a range can be requested, not
-something implemented yet.
+for that combination).
+
+If you do have a range, opt in to running the Podman backend's container as
+your real host uid/gid instead of root-mapped-through-the-user-namespace
+with `--keep-id`/`KEEP_ID=1` (`--userns=keep-id --user "$(id -u):$(id -g)"`
+under the hood; see the "Identity" bullet below):
+
+```bash
+pixi run shell-podman --keep-id           # id inside now matches your real uid/gid
+KEEP_ID=1 pixi run marimo-podman
+```
+
+Verified live: `id` inside the container reports your real uid/gid instead
+of root, and files written to `/work` come out owned by you on the host,
+same as without it -- the only thing that changes is what the container
+itself sees as its own identity. Off by default (unchanged root-inside
+behavior) since it needs a range most accounts don't have.
 
 For Podman support:
 
@@ -396,10 +408,15 @@ isn't:
   immediately instead if `--allow`/`$ALLOW_HOSTS` is set. Use the plain-HTTP
   `marimo-apptainer`/`marimo-podman` tasks (or `shell-apptainer`/
   `shell-podman`) with `--allow` instead.
-- **Identity** — **not isolated**. The container runs as your real
-  uid/gid with all your real HHMI/Janelia group memberships, not a scoped
-  service account. This is inherent to how Fileglancer/LSF jobs execute
-  today, not something a container launch script controls.
+- **Identity** — **not isolated**. Whatever files the container touches on
+  the host resolve to your real uid/gid with all your real HHMI/Janelia
+  group memberships, not a scoped service account -- this is inherent to
+  how Fileglancer/LSF jobs execute today, not something a container launch
+  script controls. This is unrelated to whether the container's *own*
+  internal view of itself is root or you (Podman defaults to root inside
+  its user namespace; opt in to your real uid/gid there too with
+  `--keep-id`, see "Podman Build" above) -- either way, the host-visible
+  file ownership is the same.
 - **Agent config dirs** (`~/.claude`, `~/.gemini`, `~/.codex`) are **not**
   mounted by default at all — a fresh sandbox starts with no host
   credentials/settings for any of them. Opt in per tool with
