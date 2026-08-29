@@ -8,7 +8,7 @@ requirements:
   - pixi
 runnables:
   - id: marimo-https
-    name: Start Marimo Server (HTTPS)
+    name: Start Marimo Server (Apptainer, HTTPS)
     type: service
     working_dir: repo
     description: >-
