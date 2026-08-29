@@ -200,5 +200,25 @@ caddy_start "$HTTPS_PORT" "$INTERNAL_PORT"
 caddy_publish_service_url "$HTTPS_PORT" "$TERMINAL_PID" \
     "https://terminal:${TOKEN}@${FG_HOSTNAME:-$HOST_NAME}:${HTTPS_PORT}/"
 
-wait "$CADDY_PID"
+# Wait on EITHER the web terminal or Caddy, not just Caddy -- see
+# https-wrap.sh's identical fix for the full reasoning (there, quitting
+# Marimo left Caddy running and the job stuck forever; here the analogous
+# case is the container itself exiting, e.g. a crash -- ttyd surviving a
+# client's shell exiting is the common/expected case and does NOT trigger
+# this, since ttyd itself keeps running to accept new connections).
+#
+# `|| true` and the 0/1 exit codes below: see https-wrap.sh's identical fix
+# for why -- `wait -n` can legitimately return nonzero ("no such job") if the
+# dying process was already reaped by the time this line runs, which would
+# otherwise abort the script here under `set -e` before cleanup/messaging
+# runs, and a second `wait` to recover its real exit code fails the same way.
+wait -n "$TERMINAL_PID" "$CADDY_PID" 2>/dev/null || true
+if ! kill -0 "$TERMINAL_PID" 2>/dev/null; then
+    echo ">> Web terminal exited -- shutting down Caddy and this job too."
+    _exit=0
+else
+    echo ">> Caddy exited unexpectedly -- shutting down the web terminal too."
+    _exit=1
+fi
 wait "${PUBLISHER_PID:-}" 2>/dev/null || true
+exit "$_exit"
