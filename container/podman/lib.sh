@@ -224,8 +224,17 @@ _podman_kill_if_orphaned_catatonit() {
 # caller does `podman_run_watched ARGS_VAR; exit $?`).
 podman_run_watched() {
     local -n _args_ref="$1"
-    local cidfile
-    cidfile="$(mktemp -u /tmp/podman-cid-XXXXXX)"
+    local cid_dir cidfile
+    # A private (mode 0700) dir from `mktemp -d`, not `mktemp -u` on the
+    # cidfile path directly -- `-u` only prints a name it thinks is free,
+    # with no exclusive creation, so a concurrent process (or an attacker
+    # in world-writable /tmp) can win the race and pre-create that path
+    # (or a symlink at it) first. `podman run --cidfile` itself still
+    # requires the file not to already exist, but nothing else can predict
+    # or race a name inside this directory. Same pattern as
+    # network_allowlist_proxy_start in common.sh.
+    cid_dir="$(mktemp -d /tmp/podman-cid-XXXXXX)"
+    cidfile="$cid_dir/cid"
 
     podman "${PODMAN_GLOBAL_ARGS[@]}" run --cidfile "$cidfile" "${_args_ref[@]}" <&3 &
     local podman_pid=$!
@@ -256,7 +265,7 @@ podman_run_watched() {
     # the race described above (catatonit orphaned right as/after `podman
     # run` returns, missed by the watchdog's last iteration).
     _podman_kill_if_orphaned_catatonit "$catatonit_pid"
-    rm -f "$cidfile"
+    rm -rf "$cid_dir"
     return "$exit_code"
 }
 
