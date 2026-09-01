@@ -8,6 +8,12 @@
 # setup, and ./lib.sh for the Podman storage/watchdog/network-allowlist
 # helpers used below.
 #
+# --userns=keep-id omitted by default, same as marimo.sh -- requires an
+# /etc/subuid range, which isn't requested by default for any account on
+# this cluster (see README's "Podman Build" prerequisite note). Opt in
+# with --keep-id/KEEP_ID=1 once you have one; see common.sh's KEEP_ID doc
+# comment for details.
+#
 # Usage:
 #   ./shell.sh
 #   RO_PATHS="/groups/scicompsoft /nrs/scicompsoft" WORK=/scratch/$USER/work ./shell.sh
