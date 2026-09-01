@@ -17,6 +17,9 @@
 #                                                    # (used by container/terminal-wrap.sh)
 set -euo pipefail
 
+source "$(dirname "$0")/../usage-lib.sh"
+[[ "${1:-}" =~ ^(-h|--help)$ ]] && print_usage_and_exit "$0"
+
 # Save the real stdin before podman run backgrounds (needed for lib.sh's
 # podman_run_watched catatonit watchdog) -- bash silently redirects a
 # backgrounded job's stdin from /dev/null otherwise, breaking the

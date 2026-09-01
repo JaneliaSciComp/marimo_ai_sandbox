@@ -12,6 +12,9 @@
 # --fakeroot` is permitted, or build elsewhere and copy the .sif over.
 set -euo pipefail
 
+source "$(dirname "$0")/../usage-lib.sh"
+[[ "${1:-}" =~ ^(-h|--help)$ ]] && print_usage_and_exit "$0"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEF="${DEF:-$SCRIPT_DIR/marimo.def}"
 SIF="${SIF:-$SCRIPT_DIR/marimo_sandbox.sif}"

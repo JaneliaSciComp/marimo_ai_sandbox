@@ -39,6 +39,9 @@
 # else podman). See runnables.yaml's terminal-podman-https.
 set -euo pipefail
 
+source "$(dirname "$0")/usage-lib.sh"
+[[ "${1:-}" =~ ^(-h|--help)$ ]] && print_usage_and_exit "$0"
+
 trap 'echo ">> terminal-wrap: FATAL: \"$BASH_COMMAND\" failed (exit $?) at line $LINENO" >&2' ERR
 
 cd "$(dirname "$0")/.."   # project root
