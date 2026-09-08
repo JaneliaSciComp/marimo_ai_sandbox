@@ -8,6 +8,9 @@
 #
 set -euo pipefail
 
+source "$(dirname "$0")/../usage-lib.sh"
+[[ "${1:-}" =~ ^(-h|--help)$ ]] && print_usage_and_exit "$0"
+
 cd "$(dirname "$0")"
 
 IMAGE="${IMAGE:-marimo_sandbox:latest}"

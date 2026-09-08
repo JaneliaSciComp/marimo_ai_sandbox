@@ -16,6 +16,7 @@ git = ">=2.55.0,<3"
 jq = ">=1.8.2,<2"          # JSON wrangling on the command line / in notebooks
 vim = ">=9.2.785,<10"         # editors available inside the sandbox
 nano = ">=9.2,<10"
+less = ">=704,<705"          # pager used as git's default diff/log viewer
 ttyd = ">=1.7.7,<2"          # web terminal server for the terminal-https runnable (see container/terminal-wrap.sh)
 
 [tasks]

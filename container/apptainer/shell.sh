@@ -22,6 +22,9 @@
 #                                                    # (used by container/terminal-wrap.sh)
 set -euo pipefail
 
+source "$(dirname "$0")/../usage-lib.sh"
+[[ "${1:-}" =~ ^(-h|--help)$ ]] && print_usage_and_exit "$0"
+
 # Captured before the cd below so common.sh can resolve a relative --work
 # path against where the user actually ran this from, not this script's dir.
 _CALLER_PWD="$PWD"

@@ -47,6 +47,9 @@
 # else podman). See runnables.yaml's marimo-podman-https for why this exists.
 set -euo pipefail
 
+source "$(dirname "$0")/usage-lib.sh"
+[[ "${1:-}" =~ ^(-h|--help)$ ]] && print_usage_and_exit "$0"
+
 # Under set -e a failing command just kills the script with no explanation,
 # which previously looked like Marimo's image build itself failing (it
 # hadn't -- the failure was elsewhere, seconds after start). Log what
