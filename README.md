@@ -175,6 +175,19 @@ Privacy & Security → Certificates → View Certificates → Authorities →
 Import). This is entirely self-contained — it doesn't depend on Fileglancer
 to obtain a cert.
 
+**Using a trusted cert instead, when available:** if the
+[`pca`](https://github.com/JaneliaSciComp/personal-certificate-authority)
+CLI is on `PATH` (and `pca init` has been run once), `caddy_generate_cert`
+prefers a `pca`-issued certificate over generating its own self-signed one —
+no flag or config needed, it's detected automatically. A `pca`-issued cert
+is signed by a CA that's actually installed in your trust store, so there's
+no untrusted-certificate warning to click through and no self-signed-cert
+CORS/`fetch` failures for anything that talks to this service
+programmatically rather than through a browser tab. If `pca` isn't
+installed, or hasn't been initialized yet, this falls straight back to the
+self-signed cert described above with no error — this is purely an
+opportunistic upgrade, not a new requirement.
+
 ### Web terminal (optional, alternative to Marimo)
 
 `pixi run terminal-https` serves a web-based terminal instead of Marimo --
@@ -589,5 +602,6 @@ To drive these agents from an external ACP client (e.g. Zed):
   `--token-password`) when exposing the port beyond localhost.
 - **HTTPS:** plain `marimo`/`start.sh` serve HTTP only. Use `pixi run
   marimo-https` for a locally TLS-terminated option (see above); its
-  self-signed cert requires installing the printed CA cert to avoid browser
-  warnings.
+  self-signed cert (or a `pca`-issued one, if available — see above)
+  requires installing the printed CA cert to avoid browser warnings, unless
+  it's already trusted via `pca init`/`pca trust`.
