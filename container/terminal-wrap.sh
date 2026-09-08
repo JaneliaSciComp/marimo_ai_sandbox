@@ -7,14 +7,25 @@
 # service-URL machinery both wrappers use.
 #
 # ttyd itself has no TLS support either (like Marimo), so this wrapper is
-# the HTTPS layer. Auth is ttyd's own HTTP Basic Auth (-c user:pass), using
-# the same token-resolution idiom as https-wrap.sh's Marimo token (prefer
-# FG_SERVICE_TOKEN, else a random token persisted per work dir) but kept in
-# its own file (.terminal-token) so the two services don't share credentials
-# even if both are pointed at the same --work dir at once. The token is
-# embedded directly in the launch URL's userinfo
-# (https://user:token@host:port/), which browsers use to auto-authenticate
-# the same way Marimo's ?access_token= query string does.
+# the HTTPS layer. Auth is HTTP Basic Auth, using the same token-resolution
+# idiom as https-wrap.sh's Marimo token (prefer FG_SERVICE_TOKEN, else a
+# random token persisted per work dir) but kept in its own file
+# (.terminal-token) so the two services don't share credentials even if both
+# are pointed at the same --work dir at once. The token is embedded directly
+# in the launch URL's userinfo (https://user:token@host:port/), which
+# browsers use to auto-authenticate the same way Marimo's ?access_token=
+# query string does.
+#
+# The credential is checked by Caddy (see caddy-lib.sh's caddy_start basic_auth
+# support), not by ttyd itself: ttyd's own `-c user:pass` auth has no env-var
+# or credential-file option (confirmed unimplemented upstream:
+# tsl0922/ttyd#872), so passing $TOKEN to it would put the token on ttyd's
+# command line -- visible to other users on the host via `ps`. Instead ttyd
+# runs in its `-H/--auth-header` "auth proxy" trust mode, which accepts any
+# request carrying a non-empty header of that name and performs no auth
+# check of its own; Caddy only forwards that header after its own basic_auth
+# has already verified the caller's credentials, so trusting the header is
+# safe -- ttyd is only reachable via Caddy (see `-i 127.0.0.1` below).
 #
 # NOT compatible with --allow/$ALLOW_HOSTS -- same reason https-wrap.sh
 # refuses it: the egress allowlist isolates the container's network
@@ -159,12 +170,13 @@ esac
 # the Caddy proxy, not directly (this relies on the container sharing the
 # host's network, which is the default -- see the --allow guard above for
 # why that default can't be turned off here). -W makes the terminal
-# writable (ttyd is read-only/view-only by default). -c embeds the TOKEN
-# resolved above as the HTTP Basic Auth password; the username ("terminal")
-# is cosmetic.
+# writable (ttyd is read-only/view-only by default). -H (not -c "$TOKEN",
+# see this file's header comment for why) puts ttyd in auth-proxy trust
+# mode: Caddy (started below) does the actual Basic Auth check and injects
+# this header once it has.
 echo ">> Starting web terminal via $SHELL_TASK (building its image first, if needed -- this can take several minutes on a fresh job) ..."
 _set_phase pulling_image
-pixi run "$SHELL_TASK" "$@" -- ttyd -i 127.0.0.1 -p "$INTERNAL_PORT" -W -c "terminal:$TOKEN" bash &
+pixi run "$SHELL_TASK" "$@" -- ttyd -i 127.0.0.1 -p "$INTERNAL_PORT" -W -H X-Ttyd-Auth bash &
 TERMINAL_PID=$!
 
 cleanup() {
@@ -177,7 +189,11 @@ trap cleanup EXIT INT TERM
 echo ">> Waiting (up to 30s) for the web terminal to accept connections on 127.0.0.1:${INTERNAL_PORT} ..."
 _terminal_up=0
 for _ in $(seq 1 30); do
-    if curl -sf -o /dev/null -u "terminal:$TOKEN" "http://127.0.0.1:$INTERNAL_PORT" 2>/dev/null; then
+    # ttyd now runs in -H auth-proxy trust mode (see the ttyd launch above),
+    # so this direct, Caddy-bypassing check must send the same trusted
+    # header Caddy would inject -- confirmed live that ttyd 1.7.7 returns
+    # 407 without it and 200 with it (any non-empty value accepted).
+    if curl -sf -o /dev/null -H "X-Ttyd-Auth: ok" "http://127.0.0.1:$INTERNAL_PORT" 2>/dev/null; then
         _terminal_up=1
         break
     fi
@@ -195,7 +211,8 @@ caddy_generate_cert "$CERT_DIR" terminal-https
 
 echo ">> HTTPS terminal: https://terminal:${TOKEN}@${HOST_NAME}:${HTTPS_PORT}/ -> 127.0.0.1:${INTERNAL_PORT}"
 echo ">> Cert: $CERT_FILE -- install it in your browser's trust store to avoid the untrusted-certificate warning."
-caddy_start "$HTTPS_PORT" "$INTERNAL_PORT"
+TOKEN_HASH="$(caddy_hash_password "$TOKEN")"
+caddy_start "$HTTPS_PORT" "$INTERNAL_PORT" terminal "$TOKEN_HASH" X-Ttyd-Auth
 
 caddy_publish_service_url "$HTTPS_PORT" "$TERMINAL_PID" \
     "https://terminal:${TOKEN}@${FG_HOSTNAME:-$HOST_NAME}:${HTTPS_PORT}/"

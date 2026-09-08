@@ -60,20 +60,48 @@ caddy_generate_cert() {
     fi
 }
 
+# caddy_hash_password -- hashes PASSWORD (e.g. a service token) with `caddy
+# hash-password`, for use in a `basic_auth` Caddyfile block (which requires a
+# bcrypt/argon2id hash, not plaintext). Fed via stdin, not `--plaintext`, so
+# the password never appears in this (or caddy's) process argv -- other
+# users on the host can read another process's argv via `ps`. A trailing
+# newline is required: `caddy hash-password` reads stdin as a line, and
+# hashes it without the newline itself (confirmed live: a hash produced this
+# way for "$TOKEN\n" validates against "$TOKEN" in a running Caddy
+# basic_auth block).
+#
+# Usage: caddy_hash_password PASSWORD
+caddy_hash_password() {
+    printf '%s\n' "$1" | caddy hash-password --algorithm bcrypt
+}
+
 # caddy_start -- writes a minimal Caddyfile TLS-terminating HTTPS_PORT and
 # reverse-proxying to 127.0.0.1:INTERNAL_PORT, using the static cert from
 # caddy_generate_cert (never Caddy's own internal-CA issuer -- see
 # https-wrap.sh's header comment for why: that issuer shells out to `sudo`
 # on first use, which hangs on a host with no interactive sudo session).
 #
-# Usage: caddy_start HTTPS_PORT INTERNAL_PORT
+# With no further args, reverse-proxies with no auth of its own (the
+# backend, e.g. Marimo, does its own token check). Passing all three
+# trailing args additionally gates the route with HTTP Basic Auth (checked
+# by Caddy itself, using a pre-hashed password -- see caddy_hash_password)
+# and injects a static, non-secret header into the proxied request for a
+# backend (e.g. ttyd's `-H/--auth-header`) that trusts its reverse proxy to
+# have already authenticated the caller instead of checking credentials
+# itself -- see terminal-wrap.sh for why: ttyd's own `-c user:pass` auth has
+# no env/file option, so its credential would otherwise have to be passed on
+# its command line (visible via `ps`).
+#
+# Usage: caddy_start HTTPS_PORT INTERNAL_PORT [BASIC_AUTH_USER BASIC_AUTH_HASH AUTH_HEADER_NAME]
 #
 # Sets: CADDYFILE, CADDY_PID
 caddy_start() {
     local https_port="$1" internal_port="$2"
+    local auth_user="${3:-}" auth_hash="${4:-}" auth_header="${5:-}"
     echo ">> Starting Caddy on :${https_port} -> 127.0.0.1:${internal_port} ..."
     CADDYFILE="$(mktemp)"
-    cat > "$CADDYFILE" <<EOF
+    {
+        cat <<EOF
 {
     admin off
     auto_https off
@@ -81,9 +109,24 @@ caddy_start() {
 
 :${https_port} {
     tls ${CERT_FILE} ${KEY_FILE}
+EOF
+        if [[ -n "$auth_user" ]]; then
+            cat <<EOF
+    basic_auth {
+        ${auth_user} ${auth_hash}
+    }
+    reverse_proxy 127.0.0.1:${internal_port} {
+        header_up ${auth_header} "ok"
+    }
+}
+EOF
+        else
+            cat <<EOF
     reverse_proxy 127.0.0.1:${internal_port}
 }
 EOF
+        fi
+    } > "$CADDYFILE"
     caddy run --config "$CADDYFILE" --adapter caddyfile &
     CADDY_PID=$!
 }
