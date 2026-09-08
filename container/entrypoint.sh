@@ -92,22 +92,28 @@ fi
 # respect them as-is rather than picking a different value.
 PORT="8080"
 TOKEN=""
+TOKEN_FILE=""
 for ((i = 1; i <= $#; i++)); do
     case "${!i}" in
-        --port)              j=$((i + 1)); [[ -n "${!j:-}" ]] && PORT="${!j}" ;;
-        --port=*)            PORT="${!i#--port=}" ;;
-        --token-password)    j=$((i + 1)); [[ -n "${!j:-}" ]] && TOKEN="${!j}" ;;
-        --token-password=*)  TOKEN="${!i#--token-password=}" ;;
+        --port)                   j=$((i + 1)); [[ -n "${!j:-}" ]] && PORT="${!j}" ;;
+        --port=*)                 PORT="${!i#--port=}" ;;
+        --token-password)         j=$((i + 1)); [[ -n "${!j:-}" ]] && TOKEN="${!j}" ;;
+        --token-password=*)       TOKEN="${!i#--token-password=}" ;;
+        --token-password-file)    j=$((i + 1)); [[ -n "${!j:-}" ]] && TOKEN_FILE="${!j}" ;;
+        --token-password-file=*)  TOKEN_FILE="${!i#--token-password-file=}" ;;
     esac
 done
+[[ -z "$TOKEN" && -n "$TOKEN_FILE" && -f "$TOKEN_FILE" ]] && TOKEN="$(cat "$TOKEN_FILE")"
 
 # No caller-supplied token (e.g. a plain local `./marimo.sh` with no
 # Fileglancer job wrapping it): prefer FG_SERVICE_TOKEN in case this is a
-# Fileglancer job that just didn't pass --token-password itself, else fall
-# back to a random token persisted under /work so local restarts reuse the
-# same value instead of a fresh, undiscoverable one every time (same idiom
-# https-wrap.sh already uses to persist its self-signed cert). Passed to
-# marimo explicitly rather than left to its own hidden default, so the
+# Fileglancer job that just didn't pass --token-password/-file itself, else
+# fall back to a random token persisted under /work so local restarts reuse
+# the same value instead of a fresh, undiscoverable one every time (same
+# idiom https-wrap.sh already uses to persist its self-signed cert). Always
+# passed to marimo explicitly (via a file, never on the command line -- see
+# https-wrap.sh's identical fix for why: argv is visible to other users on
+# the host via `ps`) rather than left to its own hidden default, so the
 # token is always known here.
 _extra_args=()
 if [[ -z "$TOKEN" ]]; then
@@ -117,9 +123,11 @@ if [[ -z "$TOKEN" ]]; then
         TOKEN="$(cat .marimo-token)"
     else
         TOKEN="$(openssl rand -hex 16)"
-        printf '%s' "$TOKEN" > .marimo-token
     fi
-    _extra_args+=(--token-password "$TOKEN")
+    # umask in a subshell, not a chmod afterward -- see https-wrap.sh's
+    # identical fix for .marimo-token/.terminal-token for the full reasoning.
+    (umask 077 && printf '%s' "$TOKEN" > .marimo-token)
+    _extra_args+=(--token-password-file .marimo-token)
 fi
 
 export MARIMO_TOKEN="$TOKEN"
