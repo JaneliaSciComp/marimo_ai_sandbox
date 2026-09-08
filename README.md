@@ -186,7 +186,11 @@ CORS/`fetch` failures for anything that talks to this service
 programmatically rather than through a browser tab. If `pca` isn't
 installed, or hasn't been initialized yet, this falls straight back to the
 self-signed cert described above with no error — this is purely an
-opportunistic upgrade, not a new requirement.
+opportunistic upgrade, not a new requirement. `pca` isn't published to
+PyPI/conda-forge yet, so getting it onto `PATH` currently means a small
+wrapper script; see "Getting `pca` itself onto PATH" in
+[`personal-certificate-authority`'s integration
+guide](https://github.com/JaneliaSciComp/personal-certificate-authority/blob/main/docs/Integration.md).
 
 ### Web terminal (optional, alternative to Marimo)
 
