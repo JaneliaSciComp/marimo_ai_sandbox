@@ -7,6 +7,177 @@ requirements:
   - apptainer
   - pixi
 runnables:
+  - id: marimo
+    name: Start Marimo Server (Apptainer, HTTP, testing)
+    type: service
+    auto_url: true
+    service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
+    working_dir: repo
+    description: >-
+      Serves the Marimo notebook server directly over plain HTTP -- no local
+      Caddy/TLS layer, for testing only. No --token-password flag of its
+      own: FG_SERVICE_TOKEN (Fileglancer's own per-job token) is already
+      forwarded into the container's environment, and container/entrypoint.sh
+      picks it up from there on its own -- see README.md's "HTTPS
+      (optional)" section for the token-handling details this depends on.
+      Compatible with Fileglancer's per-job HTTPS proxy
+      (JaneliaSciComp/fileglancer#440): once a deployment sets
+      apps.service_proxy_domain, this job's published link is fetched over
+      HTTPS end-to-end through Fileglancer's nginx proxy even though Marimo
+      itself only ever speaks plain HTTP on the compute node. Without that
+      deployment setting, the link (and the access token in its query
+      string) travels unencrypted like any other plain-HTTP job -- see
+      "marimo-https" for a self-contained HTTPS option that doesn't depend
+      on it. Uses Apptainer if available on the host, else falls back to
+      Podman -- see "marimo-podman" to force Podman. The host filesystem is
+      mounted read-only except for the work directory, which holds
+      notebooks and agent config/cache.
+    pre_run: >-
+      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-apptainer --port "$FG_SERVICE_PORT"
+    parameters:
+      - flag: --work
+        name: Work directory
+        type: directory
+        exists: false
+        description: >-
+          Writable host directory bound to /work inside the sandbox. Defaults
+          to ./work.
+      - flag: --ro-path-1
+        name: Read-only path 1
+        type: directory
+        required: false
+        exists: true
+        description: >-
+          A host directory to bind read-only into the sandbox. Must be a leaf
+          path (e.g. /groups/scicompsoft), not a bare autofs parent (/groups,
+          /nrs, /scratch). Combined with "Read-only path 2/3" and "Read-only
+          paths" below, if given.
+      - flag: --ro-path-2
+        name: Read-only path 2
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-path-3
+        name: Read-only path 3
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-paths
+        name: Read-only paths (advanced)
+        type: string
+        required: false
+        description: >-
+          Space-separated host paths bound read-only into the sandbox, for
+          more than 3 paths or when scripting -- same leaf-path rule as
+          "Read-only path 1" above. Combined with any "Read-only path"
+          slots above, if given. Defaults to conf/config.toml when none of
+          these read-only path parameters are given.
+      - flag: --allow
+        name: Allowed egress hosts
+        type: string
+        required: false
+        description: >-
+          Space-separated hostnames to allow through the opt-in network
+          egress allowlist (see README.md's "Sandbox strength" section).
+          Leave unset for the default, unrestricted egress.
+      - flag: --keep-id
+        name: Run as your real identity (Podman only)
+        type: boolean
+        required: false
+        description: >-
+          Podman only: run the container as your real host uid/gid instead
+          of root-mapped-through-the-user-namespace. No effect if this ends
+          up using Apptainer, which already runs as your real identity by
+          default. Requires an /etc/subuid//etc/subgid range for your
+          account (ask HPC -- see README.md's "Podman Build" section);
+          Podman errors out plainly if you don't have one.
+    resources:
+      cpus: 2
+      walltime: "08:00"
+
+  - id: marimo-podman
+    name: Start Marimo Server (Podman, HTTP, testing)
+    type: service
+    auto_url: true
+    service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
+    working_dir: repo
+    description: >-
+      Same as "marimo" above, but forces the Podman backend -- Podman is
+      **preferred by Janelia HPC admins** (see README.md's "GPU passthrough"
+      and "Podman storage isolation" sections). "marimo" itself always
+      prefers Apptainer when it's present on the host, with no flag/
+      parameter of its own to override that; this runnable exists
+      specifically to force Podman in that case.
+    pre_run: >-
+      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-podman --port "$FG_SERVICE_PORT"
+    parameters:
+      - flag: --work
+        name: Work directory
+        type: directory
+        exists: false
+        description: >-
+          Writable host directory bound to /work inside the sandbox. Defaults
+          to ./work.
+      - flag: --ro-path-1
+        name: Read-only path 1
+        type: directory
+        required: false
+        exists: true
+        description: >-
+          A host directory to bind read-only into the sandbox. Must be a leaf
+          path (e.g. /groups/scicompsoft), not a bare autofs parent (/groups,
+          /nrs, /scratch). Combined with "Read-only path 2/3" and "Read-only
+          paths" below, if given.
+      - flag: --ro-path-2
+        name: Read-only path 2
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-path-3
+        name: Read-only path 3
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-paths
+        name: Read-only paths (advanced)
+        type: string
+        required: false
+        description: >-
+          Space-separated host paths bound read-only into the sandbox, for
+          more than 3 paths or when scripting -- same leaf-path rule as
+          "Read-only path 1" above. Combined with any "Read-only path"
+          slots above, if given. Defaults to conf/config.toml when none of
+          these read-only path parameters are given.
+      - flag: --allow
+        name: Allowed egress hosts
+        type: string
+        required: false
+        description: >-
+          Space-separated hostnames to allow through the opt-in network
+          egress allowlist (see README.md's "Sandbox strength" section).
+          Leave unset for the default, unrestricted egress.
+      - flag: --keep-id
+        name: Run as your real identity
+        type: boolean
+        required: false
+        description: >-
+          Run the container as your real host uid/gid instead of
+          root-mapped-through-the-user-namespace. Requires an
+          /etc/subuid//etc/subgid range for your account (ask HPC -- see
+          README.md's "Podman Build" section); Podman errors out plainly if
+          you don't have one.
+    resources:
+      cpus: 2
+      walltime: "08:00"
+
   - id: marimo-https
     name: Start Marimo Server (Apptainer, HTTPS)
     type: service
