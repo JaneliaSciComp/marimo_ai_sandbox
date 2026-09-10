@@ -1,13 +1,14 @@
-name: Marimo AI Sandbox (Podman)
+name: Marimo AI Sandbox (Apptainer)
 description: >-
-  Marimo notebook server with AI coding-agent CLIs, in a read-only Podman
-  sandbox. Podman is the default backend; see "Marimo AI Sandbox
-  (Apptainer)" (marimo-apptainer/runnables.yaml) for the Apptainer app.
+  Marimo notebook server with AI coding-agent CLIs, in a read-only Apptainer
+  sandbox. See "Marimo AI Sandbox (Podman)" (the root runnables.yaml) for
+  the default, Podman-backed app.
 requirements:
+  - apptainer
   - pixi
 runnables:
   - id: marimo
-    name: Start Marimo Server (Podman)
+    name: Start Marimo Server (Apptainer)
     type: service
     auto_url: true
     service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
@@ -19,7 +20,7 @@ runnables:
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
-      PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-podman --port "$FG_SERVICE_PORT"
+      PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-apptainer --port "$FG_SERVICE_PORT"
     parameters:
       - flag: --work
         name: Work directory
@@ -68,22 +69,12 @@ runnables:
           Space-separated hostnames to allow through the opt-in network
           egress allowlist (see README.md's "Sandbox strength" section).
           Leave unset for the default, unrestricted egress.
-      - flag: --keep-id
-        name: Run as your real identity
-        type: boolean
-        required: false
-        description: >-
-          Run the container as your real host uid/gid instead of
-          root-mapped-through-the-user-namespace. Requires an
-          /etc/subuid//etc/subgid range for your account (ask HPC -- see
-          README.md's "Podman Build" section); Podman errors out plainly if
-          you don't have one.
     resources:
       cpus: 2
       walltime: "08:00"
 
   - id: marimo-https
-    name: Start Marimo Server (Podman, E2E HTTPS)
+    name: Start Marimo Server (Apptainer, E2E HTTPS)
     type: service
     service_proxy: false
     working_dir: repo
@@ -97,7 +88,7 @@ runnables:
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
-      PATH="$HOME/.pixi/bin:$PATH" BACKEND=podman pixi run --environment https
+      PATH="$HOME/.pixi/bin:$PATH" BACKEND=apptainer pixi run --environment https
       container/https-wrap.sh --port "$FG_SERVICE_PORT"
     parameters:
       - flag: --work
@@ -146,16 +137,6 @@ runnables:
         description: >-
           Public TLS port Caddy listens on. Defaults to an arbitrary free
           port chosen automatically at start.
-      - flag: --keep-id
-        name: Run as your real identity
-        type: boolean
-        required: false
-        description: >-
-          Run the container as your real host uid/gid instead of
-          root-mapped-through-the-user-namespace. Requires an
-          /etc/subuid//etc/subgid range for your account (ask HPC -- see
-          README.md's "Podman Build" section); Podman errors out plainly if
-          you don't have one.
     resources:
       cpus: 2
       walltime: "08:00"

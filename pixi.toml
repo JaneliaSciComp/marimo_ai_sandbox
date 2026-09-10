@@ -17,7 +17,7 @@ jq = ">=1.8.2,<2"          # JSON wrangling on the command line / in notebooks
 vim = ">=9.2.785,<10"         # editors available inside the sandbox
 nano = ">=9.2,<10"
 less = ">=704,<705"          # pager used as git's default diff/log viewer
-ttyd = ">=1.7.7,<2"          # web terminal server for the terminal-https runnable (see container/terminal-wrap.sh)
+ttyd = ">=1.7.7,<2"          # web terminal server for the terminal/terminal-https runnables (see container/terminal-wrap.sh)
 
 [tasks]
 # --- Apptainer ---------------------------------------------------------------
@@ -91,6 +91,18 @@ args = [
 # which this repo's other tasks/runnables also expose directly over HTTP).
 [feature.https.tasks.terminal-https]
 cmd = "container/terminal-wrap.sh --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\" --https-port \"{{ https_port }}\""
+args = [
+  { arg = "ro_paths", default = "" },
+  { arg = "work", default = "" },
+  { arg = "https_port", default = "" },
+]
+
+# Same as terminal-https above, but with --no-tls: Fileglancer's standard
+# per-job security instead of end-to-end TLS. Still needs the "https"
+# feature/environment (caddy, for the Basic Auth check terminal-wrap.sh
+# relies on) even though no cert is generated in this mode.
+[feature.https.tasks.terminal]
+cmd = "container/terminal-wrap.sh --no-tls --ro-paths \"{{ ro_paths }}\" --work \"{{ work }}\" --https-port \"{{ https_port }}\""
 args = [
   { arg = "ro_paths", default = "" },
   { arg = "work", default = "" },
