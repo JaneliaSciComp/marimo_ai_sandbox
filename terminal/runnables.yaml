@@ -1,31 +1,175 @@
 name: Web Terminal AI Sandbox
 description: >-
-  Browser-based terminal (ttyd) inside the same read-only Apptainer/Podman
-  sandbox as the Marimo AI Sandbox app -- an alternative to Marimo for
-  driving the agent CLIs (Claude Code, Codex, Gemini CLI, Antigravity) or a
-  plain shell, with no separate SSH/terminal client needed. Split into its
-  own Fileglancer app (a second runnables.yaml manifest in the same repo)
-  so it can be added independently of the Marimo notebook server.
+  Browser-based terminal (ttyd) in the same sandbox as Marimo AI Sandbox --
+  drive the agent CLIs or a shell with no separate SSH client.
 requirements:
   - apptainer
   - pixi
 runnables:
-  - id: terminal-https
-    name: Start Web Terminal (Apptainer, HTTPS)
+  - id: terminal
+    name: Start Web Terminal (Apptainer)
     type: service
     working_dir: repo
     description: >-
-      Serves a web terminal (ttyd) inside the same read-only/writable-/work
-      sandbox as an interactive shell.sh session, behind a local Caddy
-      TLS-terminating reverse proxy. Manual (non-auto_url) service, same
-      publishing/cert model as the Marimo AI Sandbox app's marimo-https
-      runnable (see container/terminal-wrap.sh). Auth is HTTP Basic
-      (embedded in the launch URL), not a query-string token like Marimo's.
-      Uses Apptainer if available, else falls back to Podman -- see
-      "terminal-podman-https" to force Podman even when Apptainer is
-      present. NOT compatible with the network egress allowlist (see
-      README.md's "Sandbox strength" section) -- terminal-wrap.sh
-      hard-errors if --allow/$ALLOW_HOSTS is set.
+      Fileglancer's standard per-job security: Caddy still fronts ttyd for
+      the Basic Auth check (embedded in the launch URL), just with no TLS
+      layer -- see "terminal-https" for end-to-end encryption instead. Uses
+      Apptainer if available, else Podman -- see "terminal-podman" to force
+      Podman. NOT compatible with the network egress allowlist (--allow).
+    pre_run: >-
+      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https
+      container/terminal-wrap.sh --no-tls
+    parameters:
+      - flag: --work
+        name: Work directory
+        type: directory
+        exists: false
+        description: >-
+          Writable host directory bound to /work inside the sandbox. Defaults
+          to ./work.
+      - flag: --ro-path-1
+        name: Read-only path 1
+        type: directory
+        required: false
+        exists: true
+        description: >-
+          A host directory to bind read-only into the sandbox. Must be a leaf
+          path (e.g. /groups/scicompsoft), not a bare autofs parent (/groups,
+          /nrs, /scratch). Combined with "Read-only path 2/3" and "Read-only
+          paths" below, if given.
+      - flag: --ro-path-2
+        name: Read-only path 2
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-path-3
+        name: Read-only path 3
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-paths
+        name: Read-only paths (advanced)
+        type: string
+        required: false
+        description: >-
+          Space-separated host paths bound read-only into the sandbox, for
+          more than 3 paths or when scripting -- same leaf-path rule as
+          "Read-only path 1" above. Combined with any "Read-only path"
+          slots above, if given. Defaults to conf/config.toml when none of
+          these read-only path parameters are given.
+      - flag: --https-port
+        name: Public port
+        type: integer
+        required: false
+        description: >-
+          Public port Caddy listens on. Defaults to an arbitrary free port
+          chosen automatically at start.
+      - flag: --keep-id
+        name: Run as your real identity (Podman only)
+        type: boolean
+        required: false
+        description: >-
+          Podman only: run the container as your real host uid/gid instead
+          of root-mapped-through-the-user-namespace. No effect if this ends
+          up using Apptainer, which already runs as your real identity by
+          default. Requires an /etc/subuid//etc/subgid range for your
+          account (ask HPC -- see README.md's "Podman Build" section);
+          Podman errors out plainly if you don't have one.
+    resources:
+      cpus: 2
+      walltime: "08:00"
+
+  - id: terminal-podman
+    name: Start Web Terminal (Podman)
+    type: service
+    working_dir: repo
+    description: >-
+      Same as "terminal", but forces the Podman backend -- preferred by
+      Janelia HPC admins (see README.md).
+    pre_run: >-
+      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
+    command: >-
+      PATH="$HOME/.pixi/bin:$PATH" BACKEND=podman pixi run --environment https
+      container/terminal-wrap.sh --no-tls
+    parameters:
+      - flag: --work
+        name: Work directory
+        type: directory
+        exists: false
+        description: >-
+          Writable host directory bound to /work inside the sandbox. Defaults
+          to ./work.
+      - flag: --ro-path-1
+        name: Read-only path 1
+        type: directory
+        required: false
+        exists: true
+        description: >-
+          A host directory to bind read-only into the sandbox. Must be a leaf
+          path (e.g. /groups/scicompsoft), not a bare autofs parent (/groups,
+          /nrs, /scratch). Combined with "Read-only path 2/3" and "Read-only
+          paths" below, if given.
+      - flag: --ro-path-2
+        name: Read-only path 2
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-path-3
+        name: Read-only path 3
+        type: directory
+        required: false
+        exists: true
+        description: Same as "Read-only path 1", another optional slot.
+      - flag: --ro-paths
+        name: Read-only paths (advanced)
+        type: string
+        required: false
+        description: >-
+          Space-separated host paths bound read-only into the sandbox, for
+          more than 3 paths or when scripting -- same leaf-path rule as
+          "Read-only path 1" above. Combined with any "Read-only path"
+          slots above, if given. Defaults to conf/config.toml when none of
+          these read-only path parameters are given.
+      - flag: --https-port
+        name: Public port
+        type: integer
+        required: false
+        description: >-
+          Public port Caddy listens on. Defaults to an arbitrary free port
+          chosen automatically at start.
+      - flag: --keep-id
+        name: Run as your real identity (Podman only)
+        type: boolean
+        required: false
+        description: >-
+          Podman only: run the container as your real host uid/gid instead
+          of root-mapped-through-the-user-namespace. No effect if this ends
+          up using Apptainer, which already runs as your real identity by
+          default. Requires an /etc/subuid//etc/subgid range for your
+          account (ask HPC -- see README.md's "Podman Build" section);
+          Podman errors out plainly if you don't have one.
+    resources:
+      cpus: 2
+      walltime: "08:00"
+
+  - id: terminal-https
+    name: Start Web Terminal (Apptainer, HTTPS)
+    type: service
+    service_proxy: false
+    working_dir: repo
+    description: >-
+      End-to-end encryption straight to the compute node via a local Caddy
+      TLS proxy -- self-signed by default, or a trusted cert if
+      personal-certificate-authority (`pca`) is installed. Opts out of
+      Fileglancer's own HTTPS proxy (service_proxy: false), since this job
+      already terminates its own TLS. Uses Apptainer if available, else
+      Podman -- see "terminal-podman-https" to force Podman. NOT compatible
+      with the network egress allowlist (--allow).
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
@@ -96,13 +240,11 @@ runnables:
   - id: terminal-podman-https
     name: Start Web Terminal (Podman, HTTPS)
     type: service
+    service_proxy: false
     working_dir: repo
     description: >-
-      Same as "terminal-https" above, but forces the Podman backend
-      (BACKEND=podman) -- Podman is **preferred by Janelia HPC admins** (see
-      README.md's "GPU passthrough" and "Podman storage isolation"
-      sections). "terminal-https" always prefers Apptainer when present,
-      with no way to force Podman otherwise.
+      Same as "terminal-https", but forces the Podman backend -- preferred
+      by Janelia HPC admins (see README.md).
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-

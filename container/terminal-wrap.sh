@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 #
 # terminal-wrap.sh -- front a web terminal (ttyd, run INSIDE the sandbox via
-# container/{apptainer,podman}/shell.sh's command-override support) with a
-# Caddy TLS-terminating reverse proxy -- the same one container/https-wrap.sh
-# uses for Marimo. See container/caddy-lib.sh for the shared cert/Caddy/
-# service-URL machinery both wrappers use.
+# container/{apptainer,podman}/shell.sh's command-override support) with
+# Caddy -- the same one container/https-wrap.sh uses for Marimo. See
+# container/caddy-lib.sh for the shared cert/Caddy/service-URL machinery
+# both wrappers use.
 #
-# ttyd itself has no TLS support either (like Marimo), so this wrapper is
-# the HTTPS layer. Auth is HTTP Basic Auth, using the same token-resolution
+# Two modes, selected by --no-tls:
+#   - default: end-to-end TLS straight to the compute node, Caddy
+#     terminating it with the cert from caddy_generate_cert (self-signed, or
+#     a personal-certificate-authority-issued one if `pca` is on PATH).
+#   - --no-tls: Fileglancer's standard per-job security, no local TLS layer
+#     -- Caddy is still required (see below for why), just with no `tls`
+#     directive in its config.
+#
+# Auth is HTTP Basic Auth in both modes, using the same token-resolution
 # idiom as https-wrap.sh's Marimo token (prefer FG_SERVICE_TOKEN, else a
 # random token persisted per work dir) but kept in its own file
 # (.terminal-token) so the two services don't share credentials even if both
 # are pointed at the same --work dir at once. The token is embedded directly
-# in the launch URL's userinfo (https://user:token@host:port/), which
+# in the launch URL's userinfo (scheme://user:token@host:port/), which
 # browsers use to auto-authenticate the same way Marimo's ?access_token=
 # query string does.
 #
@@ -37,13 +44,16 @@
 # Usage:
 #   pixi run terminal-https
 #   pixi run terminal-https --ro-paths "/groups/scicompsoft" --https-port 8443
+#   pixi run terminal --no-tls               # standard security, no TLS
 #   BACKEND=podman pixi run terminal-https   # force Podman even if Apptainer is on PATH
 #
 # Accepts (same style as container/common.sh):
 #   --ro-paths PATHS   forwarded to shell-apptainer/shell-podman
 #   --work PATH        forwarded to shell-apptainer/shell-podman
-#   --https-port PORT  public TLS-terminating port Caddy listens on (default:
-#                       an arbitrary free port, auto-selected)
+#   --https-port PORT  public port Caddy listens on, TLS or not (default: an
+#                       arbitrary free port, auto-selected)
+#   --no-tls           standard-security mode: Caddy still fronts ttyd for
+#                       the Basic Auth check, but with no TLS/cert of its own
 #
 # BACKEND=apptainer|podman (env var, not a flag) -- forces that backend
 # regardless of what's on PATH; unset auto-detects (apptainer if present,
@@ -66,6 +76,7 @@ _set_phase() {
 }
 
 HTTPS_PORT=""
+NO_TLS=0
 _args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -76,6 +87,10 @@ while [[ $# -gt 0 ]]; do
         --https-port=*)
             _val="${1#--https-port=}"
             [[ -n "$_val" ]] && HTTPS_PORT="$_val"
+            shift
+            ;;
+        --no-tls)
+            NO_TLS=1
             shift
             ;;
         *)
@@ -209,16 +224,23 @@ else
 fi
 _set_phase starting
 
-CERT_DIR="${FG_WORK_DIR:-$WORK_VAL}/https-cert"
-caddy_generate_cert "$CERT_DIR" terminal-https
-
-echo ">> HTTPS terminal: https://terminal:${TOKEN}@${HOST_NAME}:${HTTPS_PORT}/ -> 127.0.0.1:${INTERNAL_PORT}"
-echo ">> Cert: $CERT_FILE -- install it in your browser's trust store to avoid the untrusted-certificate warning."
 TOKEN_HASH="$(caddy_hash_password "$TOKEN")"
-caddy_start "$HTTPS_PORT" "$INTERNAL_PORT" terminal "$TOKEN_HASH" X-Ttyd-Auth
+if [[ "$NO_TLS" -eq 1 ]]; then
+    HOST_NAME="$(hostname -f 2>/dev/null || hostname)"
+    SCHEME=http
+    echo ">> Web terminal (standard security, no TLS): http://terminal:${TOKEN}@${HOST_NAME}:${HTTPS_PORT}/ -> 127.0.0.1:${INTERNAL_PORT}"
+    caddy_start --http "$HTTPS_PORT" "$INTERNAL_PORT" terminal "$TOKEN_HASH" X-Ttyd-Auth
+else
+    CERT_DIR="${FG_WORK_DIR:-$WORK_VAL}/https-cert"
+    caddy_generate_cert "$CERT_DIR" terminal-https
+    SCHEME=https
+    echo ">> HTTPS terminal: https://terminal:${TOKEN}@${HOST_NAME}:${HTTPS_PORT}/ -> 127.0.0.1:${INTERNAL_PORT}"
+    echo ">> Cert: $CERT_FILE -- install it in your browser's trust store to avoid the untrusted-certificate warning."
+    caddy_start "$HTTPS_PORT" "$INTERNAL_PORT" terminal "$TOKEN_HASH" X-Ttyd-Auth
+fi
 
 caddy_publish_service_url "$HTTPS_PORT" "$TERMINAL_PID" \
-    "https://terminal:${TOKEN}@${FG_HOSTNAME:-$HOST_NAME}:${HTTPS_PORT}/"
+    "${SCHEME}://terminal:${TOKEN}@${FG_HOSTNAME:-$HOST_NAME}:${HTTPS_PORT}/"
 
 # Wait on EITHER the web terminal or Caddy, not just Caddy -- see
 # https-wrap.sh's identical fix for the full reasoning (there, quitting

@@ -1,37 +1,22 @@
 name: Marimo AI Sandbox
 description: >-
-  Reactive Marimo notebook server bundled with AI coding-agent CLIs (Claude
-  Code, Codex, Gemini, Antigravity) inside a read-only Apptainer/Podman
-  sandbox; only a single work directory is writable.
+  Marimo notebook server with AI coding-agent CLIs, in a read-only
+  Apptainer/Podman sandbox.
 requirements:
   - apptainer
   - pixi
 runnables:
   - id: marimo
-    name: Start Marimo Server (Apptainer, HTTP, testing)
+    name: Start Marimo Server (Apptainer)
     type: service
     auto_url: true
     service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
     working_dir: repo
     description: >-
-      Serves the Marimo notebook server directly over plain HTTP -- no local
-      Caddy/TLS layer, for testing only. No --token-password flag of its
-      own: FG_SERVICE_TOKEN (Fileglancer's own per-job token) is already
-      forwarded into the container's environment, and container/entrypoint.sh
-      picks it up from there on its own -- see README.md's "HTTPS
-      (optional)" section for the token-handling details this depends on.
-      Compatible with Fileglancer's per-job HTTPS proxy
-      (JaneliaSciComp/fileglancer#440): once a deployment sets
-      apps.service_proxy_domain, this job's published link is fetched over
-      HTTPS end-to-end through Fileglancer's nginx proxy even though Marimo
-      itself only ever speaks plain HTTP on the compute node. Without that
-      deployment setting, the link (and the access token in its query
-      string) travels unencrypted like any other plain-HTTP job -- see
-      "marimo-https" for a self-contained HTTPS option that doesn't depend
-      on it. Uses Apptainer if available on the host, else falls back to
-      Podman -- see "marimo-podman" to force Podman. The host filesystem is
-      mounted read-only except for the work directory, which holds
-      notebooks and agent config/cache.
+      Fileglancer's standard per-job security (access token in the URL), no
+      extra TLS layer of its own -- see "marimo-https" for end-to-end
+      encryption instead. Uses Apptainer if available, else Podman -- see
+      "marimo-podman" to force Podman.
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
@@ -100,18 +85,14 @@ runnables:
       walltime: "08:00"
 
   - id: marimo-podman
-    name: Start Marimo Server (Podman, HTTP, testing)
+    name: Start Marimo Server (Podman)
     type: service
     auto_url: true
     service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
     working_dir: repo
     description: >-
-      Same as "marimo" above, but forces the Podman backend -- Podman is
-      **preferred by Janelia HPC admins** (see README.md's "GPU passthrough"
-      and "Podman storage isolation" sections). "marimo" itself always
-      prefers Apptainer when it's present on the host, with no flag/
-      parameter of its own to override that; this runnable exists
-      specifically to force Podman in that case.
+      Same as "marimo", but forces the Podman backend -- preferred by
+      Janelia HPC admins (see README.md).
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
@@ -181,14 +162,16 @@ runnables:
   - id: marimo-https
     name: Start Marimo Server (Apptainer, HTTPS)
     type: service
+    service_proxy: false
     working_dir: repo
     description: >-
-      Serves Marimo behind a local Caddy TLS-terminating reverse proxy.
-      Manual (non-auto_url) service: container/https-wrap.sh publishes the
-      launch URL itself once Caddy's HTTPS port is open, and prints a
-      self-signed cert path to trust on first run. Uses Apptainer if
-      available, else Podman -- see "marimo-podman-https" to force Podman.
-      See README.md's "HTTPS" section for details and troubleshooting.
+      End-to-end encryption straight to the compute node via a local Caddy
+      TLS proxy -- self-signed by default, or a trusted cert if
+      personal-certificate-authority (`pca`) is installed. Opts out of
+      Fileglancer's own HTTPS proxy (service_proxy: false), since this job
+      already terminates its own TLS. Uses Apptainer if available, else
+      Podman -- see "marimo-podman-https" to force Podman. See README.md's
+      "HTTPS" section for details.
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
@@ -259,15 +242,11 @@ runnables:
   - id: marimo-podman-https
     name: Start Marimo Server (Podman, HTTPS)
     type: service
+    service_proxy: false
     working_dir: repo
     description: >-
-      Same as "marimo-https" above, but forces the Podman backend
-      (BACKEND=podman) -- Podman is **preferred by Janelia HPC admins** (see
-      README.md's "GPU passthrough" and "Podman storage isolation"
-      sections). "marimo-https" itself always prefers Apptainer when it's
-      present on the host, with no flag/parameter of its own to override
-      that; this runnable exists specifically to force Podman+HTTPS in that
-      case.
+      Same as "marimo-https", but forces the Podman backend -- preferred by
+      Janelia HPC admins (see README.md).
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
