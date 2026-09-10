@@ -18,10 +18,21 @@
 # idiom as https-wrap.sh's Marimo token (prefer FG_SERVICE_TOKEN, else a
 # random token persisted per work dir) but kept in its own file
 # (.terminal-token) so the two services don't share credentials even if both
-# are pointed at the same --work dir at once. The token is embedded directly
-# in the launch URL's userinfo (scheme://user:token@host:port/), which
-# browsers use to auto-authenticate the same way Marimo's ?access_token=
-# query string does.
+# are pointed at the same --work dir at once.
+#
+# --no-tls: the token is printed (stdout and stderr) for the user to enter
+# manually, NOT embedded in the published service URL -- Fileglancer's
+# optional service proxy (apps.service_proxy_domain) can republish this
+# job's URL, and until JaneliaSciComp/fileglancer#448 merges it rejects any
+# service_url carrying HTTP Basic Auth userinfo outright, so embedding the
+# credential there would break the job's link on any deployment with that
+# proxy enabled.
+#
+# default (TLS): the token IS embedded in the launch URL's userinfo
+# (https://user:token@host:port/), which browsers use to auto-authenticate
+# the same way Marimo's ?access_token= query string does -- safe here since
+# this runnable sets service_proxy: false in runnables.yaml and so is never
+# rewritten by Fileglancer's proxy in the first place.
 #
 # The credential is checked by Caddy (see caddy-lib.sh's caddy_start basic_auth
 # support), not by ttyd itself: ttyd's own `-c user:pass` auth has no env-var
@@ -227,20 +238,37 @@ _set_phase starting
 TOKEN_HASH="$(caddy_hash_password "$TOKEN")"
 if [[ "$NO_TLS" -eq 1 ]]; then
     HOST_NAME="$(hostname -f 2>/dev/null || hostname)"
-    SCHEME=http
-    echo ">> Web terminal (standard security, no TLS): http://terminal:${TOKEN}@${HOST_NAME}:${HTTPS_PORT}/ -> 127.0.0.1:${INTERNAL_PORT}"
     caddy_start --http "$HTTPS_PORT" "$INTERNAL_PORT" terminal "$TOKEN_HASH" X-Ttyd-Auth
 else
     CERT_DIR="${FG_WORK_DIR:-$WORK_VAL}/https-cert"
     caddy_generate_cert "$CERT_DIR" terminal-https
-    SCHEME=https
-    echo ">> HTTPS terminal: https://terminal:${TOKEN}@${HOST_NAME}:${HTTPS_PORT}/ -> 127.0.0.1:${INTERNAL_PORT}"
     echo ">> Cert: $CERT_FILE -- install it in your browser's trust store to avoid the untrusted-certificate warning."
     caddy_start "$HTTPS_PORT" "$INTERNAL_PORT" terminal "$TOKEN_HASH" X-Ttyd-Auth
 fi
 
-caddy_publish_service_url "$HTTPS_PORT" "$TERMINAL_PID" \
-    "${SCHEME}://terminal:${TOKEN}@${FG_HOSTNAME:-$HOST_NAME}:${HTTPS_PORT}/"
+if [[ "$NO_TLS" -eq 1 ]]; then
+    # Fileglancer's optional service proxy (apps.service_proxy_domain) can
+    # republish this job's URL under its own domain -- but until
+    # JaneliaSciComp/fileglancer#448 merges, it rejects (403) any
+    # published service_url that carries HTTP Basic Auth userinfo at all,
+    # unlike the E2E branch below (which sets service_proxy: false in
+    # runnables.yaml and so is never proxied in the first place). Publish a
+    # bare URL with no embedded credential here, and print the credential
+    # prominently on both stdout and stderr instead, so it survives
+    # regardless of which stream ends up shown to the user, for manual
+    # entry at the browser's Basic Auth prompt.
+    URL="http://${FG_HOSTNAME:-$HOST_NAME}:${HTTPS_PORT}/"
+    _msg1=">> Web terminal (standard security, no TLS): ${URL}"
+    _msg2=">> Basic Auth required -- username: terminal   password: ${TOKEN}"
+    echo "$_msg1"; echo "$_msg2"
+    echo "$_msg1" >&2; echo "$_msg2" >&2
+    unset _msg1 _msg2
+else
+    URL="https://terminal:${TOKEN}@${FG_HOSTNAME:-$HOST_NAME}:${HTTPS_PORT}/"
+    echo ">> HTTPS terminal: $URL -> 127.0.0.1:${INTERNAL_PORT}"
+fi
+
+caddy_publish_service_url "$HTTPS_PORT" "$TERMINAL_PID" "$URL"
 
 # Wait on EITHER the web terminal or Caddy, not just Caddy -- see
 # https-wrap.sh's identical fix for the full reasoning (there, quitting

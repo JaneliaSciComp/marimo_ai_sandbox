@@ -292,12 +292,24 @@ see the `--allow` `502` note below for the identical Caddy-vs-backend-
 timing shape).
 
 Auth is HTTP Basic Auth checked by Caddy (see above), not a query-string
-token like Marimo's -- the launch URL embeds the credential directly
-(`http(s)://terminal:<token>@host:port/`), which browsers use to
-auto-authenticate the same way. The token is resolved the same way
-Marimo's is (`$FG_SERVICE_TOKEN` if this is a Fileglancer job, else a
-random token persisted at `$WORK/.terminal-token`), kept in its own file so
-the two services don't share a credential even against the same `--work`.
+token like Marimo's. The token is resolved the same way Marimo's is
+(`$FG_SERVICE_TOKEN` if this is a Fileglancer job, else a random token
+persisted at `$WORK/.terminal-token`), kept in its own file so the two
+services don't share a credential even against the same `--work`.
+
+- **`terminal-https` (E2E):** the launch URL embeds the credential directly
+  (`https://terminal:<token>@host:port/`), which browsers use to
+  auto-authenticate. Safe to publish as-is: this runnable sets
+  `service_proxy: false`, so Fileglancer never rewrites its URL.
+- **`terminal` (`--no-tls`, standard security):** the credential is
+  printed instead (to both stdout and stderr) rather than embedded in the
+  published URL. Fileglancer's optional service proxy
+  (`apps.service_proxy_domain`) *can* republish this runnable's URL, and
+  until [fileglancer#448](https://github.com/JaneliaSciComp/fileglancer/pull/448)
+  merges it rejects any `service_url` carrying HTTP Basic Auth userinfo
+  outright -- so embedding the credential here would break the job's link
+  on any deployment with that proxy enabled. Enter the printed
+  username/password by hand at the browser's Basic Auth prompt.
 
 **Not compatible with `--allow`/`$ALLOW_HOSTS`** (see "Sandbox strength"
 below) -- same reason `marimo-https` isn't: the egress allowlist isolates
