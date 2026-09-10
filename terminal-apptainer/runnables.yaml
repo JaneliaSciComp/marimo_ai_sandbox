@@ -1,25 +1,27 @@
-name: Marimo AI Sandbox (Podman)
+name: Web Terminal AI Sandbox (Apptainer)
 description: >-
-  Marimo notebook server with AI coding-agent CLIs, in a read-only Podman
-  sandbox. Podman is the default backend; see "Marimo AI Sandbox
-  (Apptainer)" (marimo-apptainer/runnables.yaml) for the Apptainer app.
+  Browser-based terminal (ttyd) in the same sandbox as Marimo AI Sandbox --
+  drive the agent CLIs or a shell with no separate SSH client. See "Web
+  Terminal AI Sandbox (Podman)" (terminal/runnables.yaml) for the default,
+  Podman-backed app.
 requirements:
+  - apptainer
   - pixi
 runnables:
-  - id: marimo
-    name: Start Marimo Server (Podman)
+  - id: terminal
+    name: Start Web Terminal (Apptainer)
     type: service
-    auto_url: true
-    service_url_suffix: "/?access_token=${FG_SERVICE_TOKEN}"
     working_dir: repo
     description: >-
-      Fileglancer's standard per-job security (access token in the URL), no
-      extra TLS layer of its own -- see "marimo-https" for end-to-end
-      encryption instead.
+      Fileglancer's standard per-job security: Caddy still fronts ttyd for
+      the Basic Auth check (embedded in the launch URL), just with no TLS
+      layer -- see "terminal-https" for end-to-end encryption instead. NOT
+      compatible with the network egress allowlist (--allow).
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
-      PATH="$HOME/.pixi/bin:$PATH" pixi run marimo-podman --port "$FG_SERVICE_PORT"
+      PATH="$HOME/.pixi/bin:$PATH" BACKEND=apptainer pixi run --environment https
+      container/terminal-wrap.sh --no-tls
     parameters:
       - flag: --work
         name: Work directory
@@ -60,30 +62,19 @@ runnables:
           "Read-only path 1" above. Combined with any "Read-only path"
           slots above, if given. Defaults to conf/config.toml when none of
           these read-only path parameters are given.
-      - flag: --allow
-        name: Allowed egress hosts
-        type: string
+      - flag: --https-port
+        name: Public port
+        type: integer
         required: false
         description: >-
-          Space-separated hostnames to allow through the opt-in network
-          egress allowlist (see README.md's "Sandbox strength" section).
-          Leave unset for the default, unrestricted egress.
-      - flag: --keep-id
-        name: Run as your real identity
-        type: boolean
-        required: false
-        description: >-
-          Run the container as your real host uid/gid instead of
-          root-mapped-through-the-user-namespace. Requires an
-          /etc/subuid//etc/subgid range for your account (ask HPC -- see
-          README.md's "Podman Build" section); Podman errors out plainly if
-          you don't have one.
+          Public port Caddy listens on. Defaults to an arbitrary free port
+          chosen automatically at start.
     resources:
       cpus: 2
       walltime: "08:00"
 
-  - id: marimo-https
-    name: Start Marimo Server (Podman, E2E HTTPS)
+  - id: terminal-https
+    name: Start Web Terminal (Apptainer, E2E HTTPS)
     type: service
     service_proxy: false
     working_dir: repo
@@ -92,13 +83,13 @@ runnables:
       TLS proxy -- self-signed by default, or a trusted cert if
       personal-certificate-authority (`pca`) is installed. Opts out of
       Fileglancer's own HTTPS proxy (service_proxy: false), since this job
-      already terminates its own TLS. See README.md's "HTTPS" section for
-      details.
+      already terminates its own TLS. NOT compatible with the network
+      egress allowlist (--allow).
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
-      PATH="$HOME/.pixi/bin:$PATH" BACKEND=podman pixi run --environment https
-      container/https-wrap.sh --port "$FG_SERVICE_PORT"
+      PATH="$HOME/.pixi/bin:$PATH" BACKEND=apptainer pixi run --environment https
+      container/terminal-wrap.sh
     parameters:
       - flag: --work
         name: Work directory
@@ -146,16 +137,6 @@ runnables:
         description: >-
           Public TLS port Caddy listens on. Defaults to an arbitrary free
           port chosen automatically at start.
-      - flag: --keep-id
-        name: Run as your real identity
-        type: boolean
-        required: false
-        description: >-
-          Run the container as your real host uid/gid instead of
-          root-mapped-through-the-user-namespace. Requires an
-          /etc/subuid//etc/subgid range for your account (ask HPC -- see
-          README.md's "Podman Build" section); Podman errors out plainly if
-          you don't have one.
     resources:
       cpus: 2
       walltime: "08:00"

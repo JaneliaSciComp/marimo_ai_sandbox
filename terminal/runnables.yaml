@@ -1,95 +1,21 @@
-name: Web Terminal AI Sandbox
+name: Web Terminal AI Sandbox (Podman)
 description: >-
   Browser-based terminal (ttyd) in the same sandbox as Marimo AI Sandbox --
-  drive the agent CLIs or a shell with no separate SSH client.
+  drive the agent CLIs or a shell with no separate SSH client. Podman is
+  the default backend; see "Web Terminal AI Sandbox (Apptainer)"
+  (terminal-apptainer/runnables.yaml) for the Apptainer app.
 requirements:
-  - apptainer
   - pixi
 runnables:
   - id: terminal
-    name: Start Web Terminal (Apptainer)
+    name: Start Web Terminal (Podman)
     type: service
     working_dir: repo
     description: >-
       Fileglancer's standard per-job security: Caddy still fronts ttyd for
       the Basic Auth check (embedded in the launch URL), just with no TLS
-      layer -- see "terminal-https" for end-to-end encryption instead. Uses
-      Apptainer if available, else Podman -- see "terminal-podman" to force
-      Podman. NOT compatible with the network egress allowlist (--allow).
-    pre_run: >-
-      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
-    command: >-
-      PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https
-      container/terminal-wrap.sh --no-tls
-    parameters:
-      - flag: --work
-        name: Work directory
-        type: directory
-        exists: false
-        description: >-
-          Writable host directory bound to /work inside the sandbox. Defaults
-          to ./work.
-      - flag: --ro-path-1
-        name: Read-only path 1
-        type: directory
-        required: false
-        exists: true
-        description: >-
-          A host directory to bind read-only into the sandbox. Must be a leaf
-          path (e.g. /groups/scicompsoft), not a bare autofs parent (/groups,
-          /nrs, /scratch). Combined with "Read-only path 2/3" and "Read-only
-          paths" below, if given.
-      - flag: --ro-path-2
-        name: Read-only path 2
-        type: directory
-        required: false
-        exists: true
-        description: Same as "Read-only path 1", another optional slot.
-      - flag: --ro-path-3
-        name: Read-only path 3
-        type: directory
-        required: false
-        exists: true
-        description: Same as "Read-only path 1", another optional slot.
-      - flag: --ro-paths
-        name: Read-only paths (advanced)
-        type: string
-        required: false
-        description: >-
-          Space-separated host paths bound read-only into the sandbox, for
-          more than 3 paths or when scripting -- same leaf-path rule as
-          "Read-only path 1" above. Combined with any "Read-only path"
-          slots above, if given. Defaults to conf/config.toml when none of
-          these read-only path parameters are given.
-      - flag: --https-port
-        name: Public port
-        type: integer
-        required: false
-        description: >-
-          Public port Caddy listens on. Defaults to an arbitrary free port
-          chosen automatically at start.
-      - flag: --keep-id
-        name: Run as your real identity (Podman only)
-        type: boolean
-        required: false
-        description: >-
-          Podman only: run the container as your real host uid/gid instead
-          of root-mapped-through-the-user-namespace. No effect if this ends
-          up using Apptainer, which already runs as your real identity by
-          default. Requires an /etc/subuid//etc/subgid range for your
-          account (ask HPC -- see README.md's "Podman Build" section);
-          Podman errors out plainly if you don't have one.
-    resources:
-      cpus: 2
-      walltime: "08:00"
-
-  - id: terminal-podman
-    name: Start Web Terminal (Podman)
-    type: service
-    working_dir: repo
-    description: >-
-      Same as "terminal", but forces the Podman backend -- preferred by
-      Janelia HPC admins (see README.md).
+      layer -- see "terminal-https" for end-to-end encryption instead. NOT
+      compatible with the network egress allowlist (--allow).
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
@@ -143,22 +69,21 @@ runnables:
           Public port Caddy listens on. Defaults to an arbitrary free port
           chosen automatically at start.
       - flag: --keep-id
-        name: Run as your real identity (Podman only)
+        name: Run as your real identity
         type: boolean
         required: false
         description: >-
-          Podman only: run the container as your real host uid/gid instead
-          of root-mapped-through-the-user-namespace. No effect if this ends
-          up using Apptainer, which already runs as your real identity by
-          default. Requires an /etc/subuid//etc/subgid range for your
-          account (ask HPC -- see README.md's "Podman Build" section);
-          Podman errors out plainly if you don't have one.
+          Run the container as your real host uid/gid instead of
+          root-mapped-through-the-user-namespace. Requires an
+          /etc/subuid//etc/subgid range for your account (ask HPC -- see
+          README.md's "Podman Build" section); Podman errors out plainly if
+          you don't have one.
     resources:
       cpus: 2
       walltime: "08:00"
 
   - id: terminal-https
-    name: Start Web Terminal (Apptainer, HTTPS)
+    name: Start Web Terminal (Podman, E2E HTTPS)
     type: service
     service_proxy: false
     working_dir: repo
@@ -167,84 +92,8 @@ runnables:
       TLS proxy -- self-signed by default, or a trusted cert if
       personal-certificate-authority (`pca`) is installed. Opts out of
       Fileglancer's own HTTPS proxy (service_proxy: false), since this job
-      already terminates its own TLS. Uses Apptainer if available, else
-      Podman -- see "terminal-podman-https" to force Podman. NOT compatible
-      with the network egress allowlist (--allow).
-    pre_run: >-
-      [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
-    command: >-
-      PATH="$HOME/.pixi/bin:$PATH" pixi run --environment https
-      container/terminal-wrap.sh
-    parameters:
-      - flag: --work
-        name: Work directory
-        type: directory
-        exists: false
-        description: >-
-          Writable host directory bound to /work inside the sandbox. Defaults
-          to ./work.
-      - flag: --ro-path-1
-        name: Read-only path 1
-        type: directory
-        required: false
-        exists: true
-        description: >-
-          A host directory to bind read-only into the sandbox. Must be a leaf
-          path (e.g. /groups/scicompsoft), not a bare autofs parent (/groups,
-          /nrs, /scratch). Combined with "Read-only path 2/3" and "Read-only
-          paths" below, if given.
-      - flag: --ro-path-2
-        name: Read-only path 2
-        type: directory
-        required: false
-        exists: true
-        description: Same as "Read-only path 1", another optional slot.
-      - flag: --ro-path-3
-        name: Read-only path 3
-        type: directory
-        required: false
-        exists: true
-        description: Same as "Read-only path 1", another optional slot.
-      - flag: --ro-paths
-        name: Read-only paths (advanced)
-        type: string
-        required: false
-        description: >-
-          Space-separated host paths bound read-only into the sandbox, for
-          more than 3 paths or when scripting -- same leaf-path rule as
-          "Read-only path 1" above. Combined with any "Read-only path"
-          slots above, if given. Defaults to conf/config.toml when none of
-          these read-only path parameters are given.
-      - flag: --https-port
-        name: HTTPS port
-        type: integer
-        required: false
-        description: >-
-          Public TLS port Caddy listens on. Defaults to an arbitrary free
-          port chosen automatically at start.
-      - flag: --keep-id
-        name: Run as your real identity (Podman only)
-        type: boolean
-        required: false
-        description: >-
-          Podman only: run the container as your real host uid/gid instead
-          of root-mapped-through-the-user-namespace. No effect if this ends
-          up using Apptainer, which already runs as your real identity by
-          default. Requires an /etc/subuid//etc/subgid range for your
-          account (ask HPC -- see README.md's "Podman Build" section);
-          Podman errors out plainly if you don't have one.
-    resources:
-      cpus: 2
-      walltime: "08:00"
-
-  - id: terminal-podman-https
-    name: Start Web Terminal (Podman, HTTPS)
-    type: service
-    service_proxy: false
-    working_dir: repo
-    description: >-
-      Same as "terminal-https", but forces the Podman backend -- preferred
-      by Janelia HPC admins (see README.md).
+      already terminates its own TLS. NOT compatible with the network
+      egress allowlist (--allow).
     pre_run: >-
       [ -n "${FG_PHASE_PATH:-}" ] && printf pulling_image > "$FG_PHASE_PATH" || true
     command: >-
@@ -298,16 +147,15 @@ runnables:
           Public TLS port Caddy listens on. Defaults to an arbitrary free
           port chosen automatically at start.
       - flag: --keep-id
-        name: Run as your real identity (Podman only)
+        name: Run as your real identity
         type: boolean
         required: false
         description: >-
-          Podman only: run the container as your real host uid/gid instead
-          of root-mapped-through-the-user-namespace. No effect if this ends
-          up using Apptainer, which already runs as your real identity by
-          default. Requires an /etc/subuid//etc/subgid range for your
-          account (ask HPC -- see README.md's "Podman Build" section);
-          Podman errors out plainly if you don't have one.
+          Run the container as your real host uid/gid instead of
+          root-mapped-through-the-user-namespace. Requires an
+          /etc/subuid//etc/subgid range for your account (ask HPC -- see
+          README.md's "Podman Build" section); Podman errors out plainly if
+          you don't have one.
     resources:
       cpus: 2
       walltime: "08:00"
