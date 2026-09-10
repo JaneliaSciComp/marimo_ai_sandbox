@@ -158,13 +158,18 @@ if [[ -n "${FG_SERVICE_TOKEN:-}" ]]; then
 elif [[ -f "$WORK_VAL/.marimo-token" ]]; then
     TOKEN="$(cat "$WORK_VAL/.marimo-token")"
 else
-    mkdir -p "$WORK_VAL"
     TOKEN="$(openssl rand -hex 16)"
-    # Create with restrictive permissions from the start (umask in a
-    # subshell, not a chmod afterward) -- see terminal-wrap.sh's identical
-    # fix for .terminal-token for the full reasoning.
-    (umask 077 && printf '%s' "$TOKEN" > "$WORK_VAL/.marimo-token")
 fi
+mkdir -p "$WORK_VAL"
+# Always (re)written, even when TOKEN came from FG_SERVICE_TOKEN or an
+# existing file, since marimo is now handed the token via
+# --token-password-file (never on the command line -- other users on the
+# host can read another process's argv via `ps`) and needs this file to
+# exist with the token actually in use. Restrictive permissions from the
+# start (umask in a subshell, not a chmod afterward) -- see
+# terminal-wrap.sh's identical fix for .terminal-token for the full
+# reasoning.
+(umask 077 && printf '%s' "$TOKEN" > "$WORK_VAL/.marimo-token")
 
 # Pick the backend to run Marimo through. Default (BACKEND unset): the same
 # auto-detection the plain-HTTP `pixi run marimo` task uses (see
@@ -199,8 +204,14 @@ esac
 # internal port, in the background. `--host 127.0.0.1` (marimo's own flag,
 # passed through unmodified by marimo.sh/marimo.def/Containerfile) keeps it
 # off 0.0.0.0 so it's only reachable through the Caddy proxy, not directly.
-# `--token-password "$TOKEN"` makes the token the one resolved above, rather
-# than a hidden random one only discoverable by scraping stdout.
+# `--token-password-file /work/.marimo-token` makes the token the one
+# resolved above, rather than a hidden random one only discoverable by
+# scraping stdout -- the *-file form (not `--token-password "$TOKEN"`) so
+# the token itself never appears in this process's (or marimo's) argv, which
+# other users on the host could otherwise read via `ps`. `/work` (not
+# `$WORK_VAL`) since that's the in-container path this bind mount is visible
+# at (see container/common.sh's BIND_PAIRS), which is what entrypoint.sh/
+# marimo actually see -- $WORK_VAL is a host-side path.
 #
 # No `--` separator here (unlike [tasks.marimo]/[tasks.shell] in pixi.toml,
 # which need one to mark the end of their own templated positional args):
@@ -214,7 +225,7 @@ esac
 # SERVICE_URL_PATH didn't match the token marimo actually enforced.
 echo ">> Starting Marimo via $MARIMO_TASK (building its image first, if needed -- this can take several minutes on a fresh job) ..."
 _set_phase pulling_image
-pixi run "$MARIMO_TASK" --port "$INTERNAL_PORT" "$@" --host 127.0.0.1 --token-password "$TOKEN" &
+pixi run "$MARIMO_TASK" --port "$INTERNAL_PORT" "$@" --host 127.0.0.1 --token-password-file /work/.marimo-token &
 MARIMO_PID=$!
 
 cleanup() {
