@@ -41,8 +41,8 @@ container/https-wrap.sh               fronts Marimo with Caddy TLS -- see "HTTPS
 container/terminal-wrap.sh            fronts a web terminal (ttyd) with Caddy TLS, an alternative
                                        to Marimo -- see "Web terminal" below
 runnables.yaml                        Fileglancer app manifest: "Marimo AI Sandbox" (marimo-https,
-                                       marimo-podman-https -- HTTPS-only, see "HTTPS (optional)"
-                                       below)
+                                       marimo-podman-https, plus marimo/marimo-podman for plain-HTTP
+                                       testing -- see "HTTPS (optional)" below)
 terminal/runnables.yaml               Separate Fileglancer app manifest: "Web Terminal AI Sandbox"
                                        (terminal-https, terminal-podman-https -- see "Web terminal"
                                        below for why this is a second manifest, not part of the one
@@ -154,11 +154,23 @@ backend preferred by HPC admins (see "GPU passthrough" and "Podman storage
 isolation" above) but the plain `marimo-https` runnable would otherwise
 always prefer Apptainer when present.
 
-`runnables.yaml` only exposes HTTPS runnables (`marimo-https`,
-`marimo-podman-https`, and the web-terminal ones below) -- the plain-HTTP
-`pixi run marimo-apptainer`/`marimo-podman` commands above still work
-directly, just aren't offered as Fileglancer jobs, since an HTTP job would
-carry Marimo's access token in the URL unencrypted.
+`runnables.yaml` also offers `marimo`/`marimo-podman` -- **for testing
+only** -- which run the same plain-HTTP `pixi run marimo-apptainer`/
+`marimo-podman` commands above directly as Fileglancer jobs, with no local
+Caddy/TLS layer, and no `--token-password`/`--token-password-file` flag of
+their own: FG_SERVICE_TOKEN (Fileglancer's own per-job token) is already
+forwarded into the container's environment (see common.sh's `ENV_PAIRS`
+allowlist), and `container/entrypoint.sh` picks it up from there on its own.
+These two runnables are compatible with Fileglancer's per-job HTTPS proxy
+([JaneliaSciComp/fileglancer#440](https://github.com/JaneliaSciComp/fileglancer/pull/440)):
+once a deployment sets `apps.service_proxy_domain`, the published link is
+fetched over HTTPS end-to-end through Fileglancer's nginx proxy even though
+Marimo itself only ever speaks plain HTTP on the compute node. Without that
+deployment setting, the link (and the access token in its query string)
+travels unencrypted between browser and compute node like any other
+plain-HTTP job -- prefer `marimo-https`/`marimo-podman-https` below for a
+self-contained HTTPS option that doesn't depend on a Fileglancer deployment
+setting.
 
 Caddy terminates TLS using a self-signed certificate that the wrapper script
 generates itself (via `openssl`) and hands to Caddy as a static cert file,
