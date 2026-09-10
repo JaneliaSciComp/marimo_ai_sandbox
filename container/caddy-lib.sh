@@ -34,15 +34,48 @@ caddy_free_port() {
 # allocation) under CERT_DIR, and reuses it on subsequent runs so the cert
 # doesn't have to be re-trusted in the browser every time.
 #
+# If the `pca` CLI (github.com/JaneliaSciComp/personal-certificate-authority)
+# is on PATH, it's preferred over the self-signed cert below: a pca-issued
+# cert is signed by a CA that `pca init`/`pca trust` actually installs into a
+# trust store, so a browser (or any HTTP client) that trusts that CA sees a
+# normal HTTPS connection instead of a self-signed-cert warning -- and
+# unlike a self-signed cert, it doesn't run into the "self-signed certs
+# break CORS/fetch" problem Fileglancer's own docs warn about for its main
+# server. This is purely opportunistic: it falls straight back to the
+# self-signed path when `pca` isn't installed or hasn't been initialized
+# (`pca init`), so nothing changes for anyone who hasn't opted in.
+#
 # Usage: caddy_generate_cert CERT_DIR CERT_NAME
-#   (files are written as CERT_DIR/CERT_NAME.crt and .key)
+#   (self-signed files are written as CERT_DIR/CERT_NAME.crt and .key; a
+#   pca-issued cert instead lives under pca's own data directory, keyed by
+#   the same CERT_NAME, and CERT_DIR is unused in that path)
 #
 # Sets: CERT_FILE, KEY_FILE, HOST_NAME
 caddy_generate_cert() {
     local cert_dir="$1" cert_name="$2"
+    HOST_NAME="$(hostname -f 2>/dev/null || hostname)"
+
+    if command -v pca >/dev/null 2>&1; then
+        local pca_data_dir="${PCA_DATA_DIR:-$HOME/.local/share/personal-certificate-authority}"
+        local pca_cert="$pca_data_dir/certs/$cert_name/cert.pem"
+        local pca_key="$pca_data_dir/certs/$cert_name/key.pem"
+        local -a pca_sans
+        pca_sans=(--san "$HOST_NAME" --san "$(hostname)" --san localhost --san 127.0.0.1)
+        local _ip
+        for _ip in $(hostname -I 2>/dev/null); do
+            pca_sans+=(--san "$_ip")
+        done
+        if pca issue --name "$cert_name" "${pca_sans[@]}" && [[ -f "$pca_cert" && -f "$pca_key" ]]; then
+            CERT_FILE="$pca_cert"
+            KEY_FILE="$pca_key"
+            echo ">> Using pca-issued HTTPS cert for ${HOST_NAME} ($CERT_FILE)"
+            return 0
+        fi
+        echo ">> WARNING: 'pca' is on PATH but issuing a certificate failed; falling back to a self-signed cert." >&2
+    fi
+
     CERT_FILE="$cert_dir/$cert_name.crt"
     KEY_FILE="$cert_dir/$cert_name.key"
-    HOST_NAME="$(hostname -f 2>/dev/null || hostname)"
 
     if [[ ! -f "$CERT_FILE" || ! -f "$KEY_FILE" ]] || ! openssl x509 -in "$CERT_FILE" -noout -checkhost "$HOST_NAME" >/dev/null 2>&1; then
         mkdir -p "$cert_dir"
